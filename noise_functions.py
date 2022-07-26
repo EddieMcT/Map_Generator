@@ -3,16 +3,30 @@ import math
 
 class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already computationally intensive
     
-    def __init__(self,x,y):
-        self.pattern = np.random.rand(x,y,3)*2 -1
+    def __init__(self,x=128,y=128,max_oct=20):
+        self.pattern_ref = np.random.rand(x,y,3)*2 -1 #array of random values between -1 and 1
+        self.cos_lut = [math.cos(2*i) for i in range(max_oct)] #used instead of calculating trig functions per pixel at runtime
+        self.sin_lut = [math.sin(2*i) for i in range(max_oct)]
+        #for i in range(max_oct): #so that negative values of i correspond to negative angles
+        #    self.cos_lut.append(math.cos(2*(i-max_oct)))
+        #    self.sin_lut.append(math.sin(2*(i-max_oct)))
+            
+    def pattern(self,x:int,y:int,ndims=3) ->float:
+        return(self.pattern_ref[x%self.pattern_ref.shape[0]][y%self.pattern_ref.shape[1]][0:ndims])
+        #Converts this version back to old method (pregen noise pattern) 
+        
+        #This is an attempt at procedural noise, but it produces too many artifacts to replace the pattern method
+        primes = [4937,6053,5843,6701,6133,7919,7823,5281,5407,5443]
+        output = np.zeros(ndims)
+        for i in range(ndims):
+            output[i] = 0.5 - ((x*(y+i+3)*7717 + y*(x+10*i)*7907*7717)%primes[i])/primes[i] #Pseudorandom output between -0.5 and 0.5
+        return(output)
         
     def base_sample(self,x,y): #ADD PERLIN SAMPLER HERE
-        x = x%self.pattern.shape[0]
-        y = y%self.pattern.shape[1]
-        a = self.pattern[int(x)][int(y)]
-        b = self.pattern[int(x)][(int(y)+1)%self.pattern.shape[1]]
-        c = self.pattern[(int(x)+1)%self.pattern.shape[0]][int(y)]
-        d = self.pattern[(int(x)+1)%self.pattern.shape[0]][(int(y)+1)%self.pattern.shape[1]]
+        a = self.pattern(math.floor(x),math.floor(y))
+        b = self.pattern(math.floor(x),(math.floor(y)+1))
+        c = self.pattern((math.floor(x)+1),math.floor(y))
+        d = self.pattern((math.floor(x)+1),(math.floor(y)+1))
         
         weights = [1-x%1, x%1, 1-y%1, y%1]
         
@@ -21,22 +35,46 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
         c = c*(weights[1]*weights[2])
         d = d*(weights[1]*weights[3])
         
-        return(a+b+c+d)
+        s = a+b+c+d
+        
+        return(s)#abs(s)*s*(3-2*s))
     
-    def sample(self,x,y,octaves=1,neg_octaves=0, fade=0.5):
+    
+    def sample(self,x,y,octaves=1,neg_octaves=0, fade=0.5,voron=False):
         output = np.asarray([0,0,0])
         for i in range(neg_octaves*-1, octaves):
             coords = np.asarray([x*2**i,y*2**i])
-            c = math.cos(2 * i)
-            s = math.sin(2 * i)
+            c = self.cos_lut[i] #faster than recalculating every time, but does give a different angle for negative i values
+            s = self.sin_lut[i]
             qx = c * coords[0] - s * coords[1]
             qy = s * coords[0] + c * coords[1]
-            output = output+ self.base_sample(qx,qy)*fade**i
+            if voron:
+                output = output+ self.voron(qx,qy)*fade**i
+            else:
+                output = output+ self.base_sample(qx,qy)*fade**i
         return(output)
     
-    def get_height(self,x,y,channel=-1, octaves=1,neg_octaves=0, fade=0.5):
-        return(self.sample(x,y,octaves, neg_octaves, fade)[channel])
+    def get_height(self,x,y,channel=-1, **kwargs):
+        #return(self.voron(x,y)) #Temporary, to test Worley noise
+        return(self.sample(x,y,**kwargs)[channel])
     
+    def voron(self,x:float,y:float,randomness = 0.5) -> float: #Create a voronoi (or Worley noise) pattern from the same starting pattern, returning distance to nearest centroid
+        loc = np.asarray([x,y]) #Actual location of sampled point within the pattern (looped over x and y limits of pattern)
+        x = math.floor(x)
+        y = math.floor(y)
+        sqdist = 100
+        dist=10 #Instantiate distance as something (hopefully?) larger than all distances
+        for x_off in range(-1,3):
+            for y_off in range(-1,3):
+                centr = np.asarray([x+x_off,y+y_off])
+                centroid = np.add(centr, self.pattern(centr[0],centr[1],2)*randomness) #get the random offset of that location in the pattern. Pattern is -1 to 1, scale by 0.5 keeps points from overlapping
+                centroid = np.add(centroid * -1, loc) #calculate vector between this centroid and the sampled location
+                new_sq = centroid[0]**2 + centroid[1]**2
+                if sqdist > new_sq: #Only calculate real distance is square
+                    sqdist = new_sq
+                    dist = min(dist, np.linalg.norm(centroid))#If this centroid is closer than previous, keep this distance (always a closest neighbour search, second closest neighbour not used here
+        return(dist)
+
 my_perl = perlin_generator(20,20)
 
 def julia(x,y,c = 1j, n = 5,cap = 2):
