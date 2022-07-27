@@ -22,11 +22,11 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
             output[i] = 0.5 - ((x*(y+i+3)*7717 + y*(x+10*i)*7907*7717)%primes[i])/primes[i] #Pseudorandom output between -0.5 and 0.5
         return(output)
         
-    def base_sample(self,x,y): #ADD PERLIN SAMPLER HERE
-        a = self.pattern(math.floor(x),math.floor(y))
-        b = self.pattern(math.floor(x),(math.floor(y)+1))
-        c = self.pattern((math.floor(x)+1),math.floor(y))
-        d = self.pattern((math.floor(x)+1),(math.floor(y)+1))
+    def base_sample(self,x,y,**kwargs): #ADD PERLIN SAMPLER HERE, currently simple interpolation
+        a = self.pattern(math.floor(x),math.floor(y),**kwargs)
+        b = self.pattern(math.floor(x),(math.floor(y)+1),**kwargs)
+        c = self.pattern((math.floor(x)+1),math.floor(y),**kwargs)
+        d = self.pattern((math.floor(x)+1),(math.floor(y)+1),**kwargs)
         
         weights = [1-x%1, x%1, 1-y%1, y%1]
         
@@ -40,8 +40,8 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
         return(s)#abs(s)*s*(3-2*s))
     
     
-    def sample(self,x,y,octaves=1,neg_octaves=0, fade=0.5,voron=False):
-        output = np.asarray([0,0,0])
+    def sample(self,x,y,octaves=1,neg_octaves=0, fade=0.5,voron=False,ndims=3) -> np.ndarray: 
+        output = np.zeros(ndims)
         for i in range(neg_octaves*-1, octaves):
             coords = np.asarray([x*2**i,y*2**i])
             c = self.cos_lut[i] #faster than recalculating every time, but does give a different angle for negative i values
@@ -51,11 +51,10 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
             if voron:
                 output = output+ self.voron(qx,qy)*fade**i
             else:
-                output = output+ self.base_sample(qx,qy)*fade**i
+                output = output+ self.base_sample(qx,qy,ndims=ndims)*fade**i
         return(output)
     
     def get_height(self,x,y,channel=-1, **kwargs):
-        #return(self.voron(x,y)) #Temporary, to test Worley noise
         return(self.sample(x,y,**kwargs)[channel])
     
     def voron(self,x:float,y:float,randomness = 0.5) -> float: #Create a voronoi (or Worley noise) pattern from the same starting pattern, returning distance to nearest centroid
