@@ -1,6 +1,8 @@
 import numpy as np
 from noise_functions import my_perl
 import random
+import math
+import gc
 
 class landscape_gen():
     def __init__(self,lat = 10, long = 10, num_plates = 5, boundaries = True):
@@ -22,9 +24,8 @@ class landscape_gen():
         self.mountains_tiles_y = []
         for i in range (num_plates): 
             self.centroids.append(np.asarray([random.random()*long, random.random()*lat])) 
-            self.heights.append(random.random())
-        #TO DO: precalculate a perlin noise texture with size = lat*long (ie one sample per kilometre)
-    
+            self.heights.append(random.random()) #To do: scale heights so they're higher in the middle and lower near edges
+        self.centroids = np.asarray(self.centroids)
     def generate_mountains(self, n=-1, additional = False, overwrite = True):
         if additional or not self.mountains_done:
             if overwrite:
@@ -61,11 +62,11 @@ class landscape_gen():
             self.mountains_tiled[tile_pos_x][tile_pos_x].append(mount)
         
         
-    def get_base_height(self, x,y):
+    def get_base_height_single(self, x,y, offset = 1, fine_offset =1, mountainsca=1): #DEPRECATED, NOT VECTORISED
         
-        offset = my_perl.sample(x,y,neg_octaves = 5, octaves=1,ndims=2) ##REFERENCES NOISE, UPDATE AS NECESSARY. Current method with -4 gives range of +-20km (real world ~= 250), each neg_octave doubles this
-        fine_offset = [0,0]#my_perl.sample(x,y,neg_octaves = -1, octaves = 3,ndims=2) #Use ndims=3 for hill noise?
-        fine_pos = np.asarray([x,y])+fine_offset
+        offset = my_perl.sample(x,y,neg_octaves = 3, octaves=0,ndims=2) * offset ##REFERENCES NOISE, UPDATE AS NECESSARY. Current method with -4 gives range of +-20km (real world ~= 250), each neg_octave doubles this
+        fine_offset = my_perl.sample(x,y,neg_octaves = -1, octaves = 4,ndims=3) * fine_offset#Use ndims=3 for hill noise?
+        fine_pos = np.asarray([x,y])+fine_offset[0:2]
         x += offset[0]
         y += offset[1]
         #noise_height = offset[2] #Necessary? May cause tiling depending on noise
@@ -100,16 +101,15 @@ class landscape_gen():
 
         bound_weight = 10*max(third - 2*sec_dist + plate_dist,0)/self.lin_sca
         #How relevant the boundary is, ~= proximity. Should be in the scale 0:1 ish
-        #To do? make this fade out at edges
         sec_weight = (plate_dist - sec_dist)/self.lin_sca #Relative importance of the second plate here, ranges from -1(variable) to 0 (hard maximum)
         secondary = 10*(base_height - self.heights[sec_num])*sec_weight #Subduction. 
         #Should be 0 at boundary, and pulse up or down as it goes away
         #Plates higher than neighbour go up, lower go down. Current range is ~-1 to 1, seafloor plates may be more extreme
 
         boundary_height = (primary + secondary) * bound_weight
-        
+        hill_height = fine_offset[2] * max(min(1,1-bound_weight),0)*0.1
         if boundary_height > 0: #Add mountain texture
-            boundary_height += boundary_height * my_perl.sample(fine_pos[0],fine_pos[1],voron=True,neg_octaves=1,octaves=2,ndims=1)[0]
+            boundary_height += mountainsca * boundary_height * my_perl.sample(fine_pos[0],fine_pos[1],voron=True,neg_octaves=2,octaves=2,ndims=1,fade=0.3)[0]
         
         #Blur with second plate using weighted sum (weights = sec_weight)
         #Note: Only uses second plate, not third, so will create artifacts around joins of multiple plates
@@ -117,17 +117,93 @@ class landscape_gen():
         sec_height = self.heights[sec_num] * (0.5+sec_weight)
         base_height = base_height * (0.5-sec_weight) + sec_height
         
-        height = base_height + boundary_height
+        height = base_height + boundary_height + hill_height
         
         outer_weight = max(abs(x - 0.5*self.long)/self.long,0.5, abs(y - 0.5*self.lat)/self.lat)#0.5 inside bounds, increasing as you leave
         outer_weight = max(1.5 - outer_weight,0) #Causes all height calculations to drop to 0 as you leave the zone
         return(outer_weight*height)
         
-    def get_height(self, x,y):
-        height = 0
-        base = self.get_base_height(x,y)
-        height += base
         
+    def get_base_height(self, x,y, offset = 1, fine_offset =1, mountainsca=1):
+
+        offset = my_perl.sample(x,y,neg_octaves = 3, octaves=1,ndims=2) * offset ##REFERENCES NOISE, UPDATE AS NECESSARY. Current method with -4 gives range of +-20km (real world ~= 250), each neg_octave doubles this
+        fine_offset = my_perl.sample(x,y,neg_octaves = -1, octaves = 4,ndims=3) * fine_offset#Use ndims=3 for hill noise?
+        fine_x = np.add(x, fine_offset[:,:,0])
+        fine_y = np.add(y, fine_offset[:,:,1])
+        #fine_pos = np.asarray([x,y])+fine_offset[0:2]
+        x += offset[:,:,0]
+        y += offset[:,:,1]
+
+        x = np.array(x)
+        y = np.array(y)
+        #noise_height = offset[2] #Necessary? May cause tiling depending on noise
+        xdist = x[:, :, np.newaxis] - self.centroids[:, 0]
+        ydist = y[:, :, np.newaxis] - self.centroids[:, 1]
+        distances = np.sqrt(xdist**2 + ydist**2)
+        del xdist
+        del ydist
+        gc.collect()
+        #Find distance for each plate 
+        #xdist = np.stack([x for _ in self.centroids])
+        #xdist -= np.asarray(my_landscape.centroids)[:,0] #Specify axis for broadcasting? what if shape of x == num of centroids?
+        #xdist = np.square(xdist)
+        #ydist = np.stack([y for _ in self.centroids])
+        #ydist -= np.asarray(my_landscape.centroids)[:,1] #Specify axis for broadcasting? what if shape of x == num of centroids?
+        #ydist = np.square(ydist)
+        #distances = xdist + ydist
+        #distances = np.sqrt(distances)    
+
+        dist_argsort = np.argsort(distances, axis = -1)
+        distances = np.sort(distances, axis = -1)
+
+        plate_dist = distances[:,:,0]#Distance to closest plate
+        sec_dist = distances[:,:,1]
+        third = distances[:,:,2]
+
+        plate_num = dist_argsort[:,:,0]#ID of closest plate
+        base_height = np.take(self.heights, plate_num) #Height this ground should be if there were no additional features
+        sec_num = dist_argsort[:,:,1] #ID of second closest plate, ID of third not used
+        sec_height = np.take(self.heights, sec_num)
+        
+        del distances
+        del dist_argsort
+        gc.collect()
+        #TO DO: replace this with calculation of appropriate height that includes subduction
+
+        primary = (base_height + sec_height - 0.8)/1.2 #Mountain ranges or valleys
+        #Symmetrical over boundary, raised for high pairs and depressed for low pairs
+        #Usual value range is -1 to 1
+
+        bound_weight = 10*np.maximum(third - 2*sec_dist + plate_dist,0)/self.lin_sca
+        #How relevant the boundary is, ~= proximity. Should be in the scale 0:1 ish
+        sec_weight = (plate_dist - sec_dist)/self.lin_sca #Relative importance of the second plate here, ranges from -1(variable) to 0 (hard maximum)
+        secondary = 10*(base_height - sec_height)*sec_weight #Subduction. 
+        #Should be 0 at boundary, and pulse up or down as it goes away
+        #Plates higher than neighbour go up, lower go down. Current range is ~-1 to 1, seafloor plates may be more extreme
+
+        boundary_height = (primary + secondary) * bound_weight
+        hill_height = fine_offset[:,:,2] * np.maximum(np.minimum(1,1-bound_weight),0)*0.1
+        #Add mountain texture
+        print(boundary_height.shape)
+        print(np.maximum(boundary_height, 0).shape)
+        boundary_height += mountainsca * np.multiply(np.maximum(boundary_height, 0) , my_perl.sample(fine_x,fine_y,voron=True,neg_octaves=2,octaves=2,ndims=1,fade=0.3)[:,:,0])###IS THIS SCALE CORRECT?)
+
+        #Blur with second plate using weighted sum (weights = sec_weight)
+        #Note: Only uses second plate, not third, so will create artifacts around joins of multiple plates
+        sec_weight = np.maximum(sec_weight*10,-0.5)
+        sec_height = sec_height * (0.5+sec_weight)
+        base_height = base_height * (0.5-sec_weight) + sec_height + boundary_height + hill_height
+
+        outer_weight = np.maximum(np.absolute(x - 0.5*self.long)/self.long,0.5, np.absolute(y - 0.5*self.lat)/self.lat)#0.5 inside bounds, increasing as you leave
+        outer_weight = np.maximum(1.5 - outer_weight,0) #Causes all height calculations to drop to 0 as you leave the zone
+        return(outer_weight*base_height)
+    
+    def get_height(self, x,y,**kwargs):
+        height = 0
+        base = self.get_base_height(x,y,**kwargs)
+        #height += base
+        
+        return(base) #Currently mountains and rivers are unused, and not adapted for vectorisation
         mountain_height = 0
         if self.mountains_done: #If this landscape has mountains, their contribution to height is determined here
             try: #This will fail at certain edges. TO DO: fix for looped worlds?
@@ -150,4 +226,5 @@ class landscape_gen():
             for river in self.rivers:
                 river_height = river.get_height(x,y) #NOT YET IMPLEMENTED 
             height += river_height
-        return(height)
+        return(base) #Currently mountains and rivers are unused, and not adapted for vectorisation
+    

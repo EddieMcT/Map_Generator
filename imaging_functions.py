@@ -47,15 +47,20 @@ def show_map(gen_object, x,y, scale=1, offset=[0,0], sampling = 1, channel=-1, o
             else:
                 output[j][i] = out
     return(output)
-
-def show_map_3d(gen_obj,img_x,img_y,sca,centre_offset=[0,0],num_samples = 1,**kwargs):
+def show_map_3d(gen_obj,img_x,img_y,sca,centre_offset=[0,0],num_samples = 1,vectorised = False, **kwargs):
     #x = np.arange(int(centre_offset[0]-0.5*img_x*sca), int(centre_offset[0]-0.5*img_x*sca)+img_x*sca, sca)
     #y = np.arange(int(centre_offset[1]-0.5*img_y*sca), int(centre_offset[1]-0.5*img_y*sca)+img_y*sca, sca)
     x = np.linspace(int(centre_offset[0]-0.5*img_x*sca), int(centre_offset[0]+0.5*img_x*sca), img_x)
     y = np.linspace(int(centre_offset[1]-0.5*img_y*sca), int(centre_offset[1]+0.5*img_y*sca), img_y)
     X, Y = np.meshgrid(x, y)
     if num_samples == 1:
-        Z = np.asarray([[gen_obj.get_height(a,b,**kwargs) for a in x] for b in y])
+        if not vectorised:
+            Z = np.asarray([[gen_obj.get_height(a,b,**kwargs) for a in x] for b in y])
+        
+        ###VECTORISED SAMPLE OF generator
+        else:
+            Z = gen_obj.get_height(X,Y,**kwargs)
+        
     else:
         Z = np.zeros((img_x,img_y))
         for _ in range(num_samples):

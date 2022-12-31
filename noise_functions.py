@@ -3,7 +3,7 @@ import math
 
 class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already computationally intensive
     
-    def __init__(self,x=128,y=128,max_oct=20):
+    def __init__(self,x=128,y=128,max_oct=32):
         self.pattern_ref = np.random.rand(x,y,3)*2 -1 #array of random values between -1 and 1
         self.cos_lut = [math.cos(2*i) for i in range(max_oct)] #used instead of calculating trig functions per pixel at runtime
         self.sin_lut = [math.sin(2*i) for i in range(max_oct)]
@@ -11,8 +11,8 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
         #    self.cos_lut.append(math.cos(2*(i-max_oct)))
         #    self.sin_lut.append(math.sin(2*(i-max_oct)))
             
-    def pattern(self,x:int,y:int,ndims=3) ->float:
-        return(self.pattern_ref[x%self.pattern_ref.shape[0]][y%self.pattern_ref.shape[1]][0:ndims])
+    def pattern(self,x,y,ndims=3):
+        return(self.pattern_ref[x.astype(int)%self.pattern_ref.shape[0],y.astype(int)%self.pattern_ref.shape[1],0:ndims])
         #Converts this version back to old method (pregen noise pattern) 
         
         #This is an attempt at procedural noise, but it produces too many artifacts to replace the pattern method
@@ -23,31 +23,49 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
         return(output)
         
     def base_sample(self,x,y,**kwargs): #ADD PERLIN SAMPLER HERE, currently simple interpolation
-        a = self.pattern(math.floor(x),math.floor(y),**kwargs)
-        b = self.pattern(math.floor(x),(math.floor(y)+1),**kwargs)
-        c = self.pattern((math.floor(x)+1),math.floor(y),**kwargs)
-        d = self.pattern((math.floor(x)+1),(math.floor(y)+1),**kwargs)
+        lox = np.floor(x)
+        loy = np.floor(y)
+        a = self.pattern(lox,loy,**kwargs)
+        b = self.pattern(lox,(loy+1),**kwargs)
+        c = self.pattern((lox+1),loy,**kwargs)
+        d = self.pattern((lox+1),(loy+1),**kwargs)
         
-        weights = [1-x%1, x%1, 1-y%1, y%1]
+        #weights = [1-x%1, x%1, 1-y%1, y%1]
+        #a = a*(weights[0]*weights[2])
+        #b = b*(weights[0]*weights[3])
+        #c = c*(weights[1]*weights[2])
+        #d = d*(weights[1]*weights[3])
+        weight1 = x%1
+        weight1 = weight1[:,:,None]
+        weight0 = 1-weight1
+        weight3 = y%1
+        weight3 = weight3[:,:,None]
+        weight2 = 1-weight3
+        a *= weight0
+        a *= weight2
+        b *= weight0
+        b *= weight3
+        c *= weight1
+        c *= weight2
+        d *= weight1
+        d *= weight3
+        a = np.add(a,b)
+        c = np.add(c,d)
         
-        a = a*(weights[0]*weights[2])
-        b = b*(weights[0]*weights[3])
-        c = c*(weights[1]*weights[2])
-        d = d*(weights[1]*weights[3])
-        
-        s = a+b+c+d
-        
+        s = np.add(a,c)
         return(s)#abs(s)*s*(3-2*s))
     
     
-    def sample(self,x,y,octaves=1,neg_octaves=0, fade=0.5,voron=False,ndims=3) -> np.ndarray: 
+    def sample(self,x,y,octaves=1,neg_octaves=0, fade=0.5,voron=False,ndims=3, **kwargs) -> np.ndarray: 
         output = np.zeros(ndims)
         for i in range(neg_octaves*-1, octaves):
-            coords = np.asarray([x*2**i,y*2**i])
+            a = 2 ** i #Scale the starting positions by 2 for each octave
+            ax = x * a
+            ay = y * a
             c = self.cos_lut[i] #faster than recalculating every time, but does give a different angle for negative i values
             s = self.sin_lut[i]
-            qx = c * coords[0] - s * coords[1]
-            qy = s * coords[0] + c * coords[1]
+            qx = c * ax - s * ay
+            qy = s * ax + c * ay
             if voron:
                 output = output+ self.voron(qx,qy)*fade**i
             else:
@@ -55,9 +73,29 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
         return(output)
     
     def get_height(self,x,y,channel=-1, **kwargs):
-        return(self.sample(x,y,**kwargs)[channel])
+        return(self.sample(x,y,**kwargs)[:,:,channel]) #Note that ndims >1 is irrelevant if channel is not a list/array, as only one channel will be selected
     
-    def voron(self,x:float,y:float,randomness = 0.5) -> float: #Create a voronoi (or Worley noise) pattern from the same starting pattern, returning distance to nearest centroid
+    def voron(self,x,y,randomness = 0.5): #Create a voronoi (or Worley noise) pattern from the same starting pattern, returning distance to nearest centroid
+        lox = np.floor(x)
+        loy = np.floor(y)
+        frac = np.stack([x%1, y%1], axis = -1)
+        sqdist = np.zeros_like(x) + 1000
+        dist=  np.zeros_like(x) + 10#Instantiate distance as something (hopefully?) larger than all distances
+        for x_off in range(-1,3):
+            for y_off in range(-1,3):
+                #get the random offset of that location in the pattern. Pattern is -1 to 1, scale by 0.5 keeps points from overlapping
+                centroid = self.pattern(lox + x_off, loy + y_off,ndims = 2)
+                centroid += [x_off, y_off]
+                centroid = np.subtract(frac, centroid)#calculate vector between this centroid and the sampled location
+                
+                centroid = np.square(centroid)
+                centroid = np.sum(centroid, axis = -1)
+                
+                sqdist = np.minimum(sqdist, centroid)#If this centroid is closer than previous, keep this distance (always a closest neighbour search, second closest neighbour not used here
+        return(np.sqrt(sqdist)[:,:,None])
+    
+    
+    def voron_old(self,x:float,y:float,randomness = 0.5) -> float: #DEPRECATED:, works with non-vectorised inputs
         loc = np.asarray([x,y]) #Actual location of sampled point within the pattern (looped over x and y limits of pattern)
         x = math.floor(x)
         y = math.floor(y)

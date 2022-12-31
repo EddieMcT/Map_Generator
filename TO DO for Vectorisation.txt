@@ -1,0 +1,26 @@
+TO DO FOR VECTORISATION
+
+Noise_functions: 
+        Perlin generator 
+            DONE, INCOMPATIBLE WITH OLD
+                sample, 
+                        DONE, UNCHECKED
+                get_height, 
+                        Done, channel select changed
+                pattern
+                        DONE, incompatible with for loop method?
+                base_sample,
+                        DONE, CHECKED
+                voron,
+                        DONE, CHECKED
+landscape:
+        get_height should work for vectorised (check) as long as mountains are False
+        get_base_height 
+                needs to work with vectorisation
+                Confirm which distance for centroids is used
+                Calculate centroid distance in vectorised way (???)
+                significant rewrite of functional steps needed
+
+imaging_functions:
+        add option for vectorised version of show_map_3D (easy)
+                            CHECKED
