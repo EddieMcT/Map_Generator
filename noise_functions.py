@@ -112,7 +112,7 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
                     dist = min(dist, np.linalg.norm(centroid))#If this centroid is closer than previous, keep this distance (always a closest neighbour search, second closest neighbour not used here
         return(dist)
 
-my_perl = perlin_generator(20,20)
+my_perl = perlin_generator(256,256)
 
 def julia(x,y,c = 1j, n = 5,cap = 2):
     z = x + y*1j
