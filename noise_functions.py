@@ -4,6 +4,7 @@ import math
 class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already computationally intensive
     
     def __init__(self,x=128,y=128,max_oct=32):
+        np.random.seed(1)
         self.pattern_ref = np.random.rand(x,y,3)*2 -1 #array of random values between -1 and 1
         self.cos_lut = [math.cos(2*i) for i in range(max_oct)] #used instead of calculating trig functions per pixel at runtime
         self.sin_lut = [math.sin(2*i) for i in range(max_oct)]
@@ -37,9 +38,11 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
         #d = d*(weights[1]*weights[3])
         weight1 = x%1
         weight1 = weight1[:,:,None]
+        weight1 = weight1 * weight1 * weight1 * (weight1 * (6 * weight1 - 15) + 10)
         weight0 = 1-weight1
         weight3 = y%1
         weight3 = weight3[:,:,None]
+        weight3 = weight3 * weight3 * weight3 * (weight3 * (6 * weight3 - 15) + 10)
         weight2 = 1-weight3
         a *= weight0
         a *= weight2
@@ -68,6 +71,7 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
             qy = s * ax + c * ay
             if voron:
                 output = output+ self.voron(qx,qy)*fade**i
+            #TO DO: Add noise variant for Dendry, wherein nearest centroid is found
             else:
                 output = output+ self.base_sample(qx,qy,ndims=ndims)*fade**i
         return(output)
@@ -75,6 +79,27 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
     def get_height(self,x,y,channel=-1, **kwargs):
         return(self.sample(x,y,**kwargs)[:,:,channel]) #Note that ndims >1 is irrelevant if channel is not a list/array, as only one channel will be selected
     
+    def river_noise(self, x,y,octaves=np.array([[1]]),neg_octaves=np.array([[0]])):
+        for octave in range (int(-1*np.max(np.ceil(neg_octaves))), int(np.max(np.ceil(octaves)))):
+            print(octave)
+
+
+        return(x)
+    def find_nearest(self,x,y,randomness = 0.5): #Create a voronoi (or Worley noise) pattern from the same starting pattern, returning distance to nearest centroid
+        lox = np.floor(x)
+        loy = np.floor(y)
+        sqdist = np.zeros_like(x) + 1000
+        for x_off in range(-2,4):
+            for y_off in range(-2,4):
+                #get the random offset of that location in the pattern. Pattern is -1 to 1, scale by 0.5 keeps points from overlapping
+                centroid = self.pattern(lox + x_off, loy + y_off,ndims = 2)
+                centroid += [x_off, y_off]
+                
+                centroid = np.square(centroid)
+                centroid = np.sum(centroid, axis = -1)
+                
+                sqdist = np.minimum(sqdist, centroid)#If this centroid is closer than previous, keep this distance (always a closest neighbour search, second closest neighbour not used here
+        return(np.sqrt(sqdist)[:,:,None])
     def voron(self,x,y,randomness = 0.5): #Create a voronoi (or Worley noise) pattern from the same starting pattern, returning distance to nearest centroid
         lox = np.floor(x)
         loy = np.floor(y)
