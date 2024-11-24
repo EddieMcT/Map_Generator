@@ -136,6 +136,49 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
                     sqdist = new_sq
                     dist = min(dist, np.linalg.norm(centroid))#If this centroid is closer than previous, keep this distance (always a closest neighbour search, second closest neighbour not used here
         return(dist)
+    def profile_base_sample(self, x, y, ndims=3): #Not to be used in production code, only for profiling current version of base_sample
+        import time
+        # Time each major operation
+        timings = {}
+        
+        start = time.perf_counter()
+        lox = np.floor(x)
+        loy = np.floor(y)
+        timings['floor'] = time.perf_counter() - start
+        
+        start = time.perf_counter()
+        a = self.pattern(lox, loy, ndims=ndims)
+        b = self.pattern(lox, (loy+1), ndims=ndims)
+        c = self.pattern((lox+1), loy, ndims=ndims)
+        d = self.pattern((lox+1), (loy+1), ndims=ndims)
+        timings['pattern_lookup'] = time.perf_counter() - start
+        
+        start = time.perf_counter()
+        weight1 = x % 1
+        weight1 = weight1[:,:,None]
+        weight1 = weight1 * weight1 * weight1 * (weight1 * (6 * weight1 - 15) + 10)
+        weight0 = 1-weight1
+        weight3 = y % 1
+        weight3 = weight3[:,:,None]
+        weight3 = weight3 * weight3 * weight3 * (weight3 * (6 * weight3 - 15) + 10)
+        weight2 = 1-weight3
+        timings['weight_calc'] = time.perf_counter() - start
+        
+        start = time.perf_counter()
+        a *= weight0
+        a *= weight2
+        b *= weight0
+        b *= weight3
+        c *= weight1
+        c *= weight2
+        d *= weight1
+        d *= weight3
+        a = np.add(a,b)
+        c = np.add(c,d)
+        s = np.add(a,c)
+        timings['interpolation'] = time.perf_counter() - start
+        
+        return s, timings
 
 my_perl = perlin_generator(256,256)
 
