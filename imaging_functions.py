@@ -1,4 +1,6 @@
 import numpy as np
+import cv2
+import matplotlib.pyplot as plt
 
 def show_map(gen_object, x,y, scale=1, offset=[0,0], sampling = 1, channel=-1, octaves=1,neg_octaves=0, fade=0.5,dim3=False):
     sampling = int(sampling) #Just a check to clean up this input
@@ -73,3 +75,14 @@ def show_map_3d(gen_obj,img_x,img_y,sca,centre_offset=[0,0],num_samples = 1,vect
             Z += np.asarray([[gen_obj.get_height(a,b,**kwargs) for a in x] for b in y])/num_samples
             
     return (X, Y, Z)
+
+def normalize(Z, name = None): # normalizes Z to [0,1] and converts to uint16
+    Z = Z + -1 * np.min(Z)
+    Z = 65535*Z /np.max(Z) - 0
+    Z = Z.astype(np.uint16)
+
+    plt.imshow(Z*0.5 + 0.5)
+    plt.show()
+    if name is not None:
+        cv2.imwrite(name, Z)
+    return Z

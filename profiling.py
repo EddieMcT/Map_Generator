@@ -12,8 +12,8 @@ class PerlinProfiler:
         self.X, self.Y = np.meshgrid(self.x, self.y)
         
     @memory_profiler.profile
-    def profile_single_sample(self):
-        return my_perl.sample(self.X, self.Y, neg_octaves=4, octaves=4, ndims=2)
+    def profile_single_sample(self, voron = False):
+        return my_perl.sample(self.X, self.Y, neg_octaves=4, octaves=4, ndims=2, voron=voron)
     
     def time_complexity_test(self):
         sizes = [128, 256, 512, 1024, 1536, 2048]#, 2560, 3072, 3584, 4096, 4608, 5120, 5632, 6144, 6656, 7168, 7680, 8192]
@@ -25,12 +25,12 @@ class PerlinProfiler:
             X, Y = np.meshgrid(x, y)
             
             start_time = time.perf_counter()
-            _ = my_perl.sample(X, Y, neg_octaves=4, octaves=-1, ndims=2)
+            _ = my_perl.sample(X, Y, neg_octaves=2, octaves=1, ndims=2)
             times.append(time.perf_counter() - start_time)
             
             # Track peak memory for this size
             mem_usage = memory_profiler.memory_usage((my_perl.sample, (X, Y), 
-                {'neg_octaves': 2, 'octaves': -2-1, 'ndims': 3}), max_usage=True)
+                {'neg_octaves': 2, 'octaves': 1, 'ndims': 3}), max_usage=True)
             memories.append(mem_usage)
             
         return sizes, times, memories
@@ -80,6 +80,8 @@ def run_profiling(full = False):
     profiler = PerlinProfiler()
     print("\nProfiling single Perlin noise sample:")
     cProfile.runctx('profiler.profile_single_sample()', globals(), {'profiler': profiler})
+    print("\nProfiling single Perlin noise sample with voronoi:")
+    cProfile.runctx('profiler.profile_single_sample(voron=True)', globals(), {'profiler': profiler})
     
     # Add landscape profiling
     landscape_prof = LandscapeProfiler()
@@ -114,4 +116,4 @@ def run_profiling(full = False):
         print(f"Total noise function calls: {noise_calls}")
 
 if __name__ == "__main__":
-    run_profiling(True)
+    run_profiling(False)
