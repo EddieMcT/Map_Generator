@@ -6,7 +6,7 @@ from scipy.interpolate import CubicSpline
 # Helper functions (to move to another file?)
 # =========================
 
-def generate_spline_points(x1, y1, x2, y2, n_points, delta=0.05, method = 'count'):
+def generate_spline_points(x1, y1, x2, y2, n_points=10, delta=0.05, method = 'count'):
     """
     Generate points along a spline between two points.
     For now, this is implemented as a simple linear interpolation (placeholder).
@@ -27,6 +27,44 @@ def find_nearest_points(x, y, candidate_x, candidate_y):
     nearest_idx = np.argmin(sq_distances, axis=-1)
 
     return nearest_idx, sq_distances
+
+def index_within_subgrid(val, x, y):
+    # for a 4D array of x,y,x,y (ie a subgrid per point in array) take the values indicated by x (in the last dimension) and y (in the second to last dimension)
+    # Shape of val is (a,b,c,d), shape of x, y, and output = (a,b,e,f)
+
+    # Create two placeholder arrays, values = 0:a and 0:b, to index the first two (outer) axes and allow for fancy indexing
+    index_1, index_2 = np.ogrid[:val.shape[0], :val.shape[1]]
+    #Project these along the later axes to match output shape
+    index_1 = np.broadcast_to(index_1[:,:,np.newaxis, np.newaxis], x.shape)
+    index_2 = np.broadcast_to(index_2[:,:,np.newaxis, np.newaxis], x.shape)
+    return(val[index_1, index_2, y,x])
+
+def check_inner_grid(c = None):
+    # For each of the inner 3*3 grid points in a 5*5 matrix, find which of its eight neighbours has the lowest value of c
+    # If no value of c is provided, use distance?
+    # Expected shape of  c is (X, Y, n_points, n_points)
+    # Shape of output is (X, Y, n_points-2, n_points-2) because we exclude the outer two rows and columns from consideration
+
+    # Find the c values of neighbours for each point being calculated
+    # shape=(X,Y,n_points-2, n_points-2, 3,3)
+    neighbour_c = np.lib.stride_tricks.sliding_window_view(c, (3, 3), axis=(-2, -1))
+
+
+    # Take the index of the lowest neighbour in the n_points-2 by n_points-2 grid
+    neighbour_x = np.argmin(neighbour_c, axis=-1) 
+    min_x = np.min(neighbour_c, axis=-1)
+    neighbour_y = np.argmin(min_x, axis=-1) 
+    # Take the neighbour_yth entry for each of neighbour_x entries
+    neighbour_x = np.take_along_axis(neighbour_x, neighbour_y[:,:,:, :, None], axis=-1).squeeze()
+
+    # This gives the index of the lowest neighbour in the 3*3 grid for each point being calculated
+    # Correct to indices within original 5*5 grid:
+    indices = np.indices(neighbour_x.shape)
+    neighbour_x += indices[-1]
+    neighbour_y += indices[-2]
+    
+    return neighbour_x, neighbour_y
+
 class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already computationally intensive
     
     def __init__(self,x=128,y=128,max_oct=32):
@@ -68,31 +106,6 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
         y_exp += epsilon*jitter[:, :,:,:, 1]
         return x_exp, y_exp
 
-    def check_inner_grid(self, c = None):
-        # For each of the inner 3*3 grid points in a 5*5 matrix, find which of its eight neighbours has the lowest value of c
-        # If no value of c is provided, use distance?
-        # Expected shape of  c is (X, Y, n_points, n_points)
-        # Shape of output is (X, Y, n_points-2, n_points-2) because we exclude the outer two rows and columns from consideration
-
-        # Find the c values of neighbours for each point being calculated
-        # shape=(X,Y,n_points-2, n_points-2, 3,3)
-        neighbour_c = np.lib.stride_tricks.sliding_window_view(c, (3, 3), axis=(-2, -1))
-
-
-        # Take the index of the lowest neighbour in the n_points-2 by n_points-2 grid
-        neighbour_x = np.argmin(neighbour_c, axis=-1) 
-        neighbour_x = np.argmin(neighbour_x, axis=-1) 
-        
-        neighbour_y = np.argmin(neighbour_c, axis=-2) 
-        neighbour_y = np.argmin(neighbour_y, axis=-1) 
-        # This gives the index of the lowest neighbour in the 3*3 grid for each point being calculated
-        # Correct to indices within original 5*5 grid:
-        grid_size = c.shape[-2] -2 # This is the size of the inner part of the 5*5 grid that we are considering
-        offsets = np.arange(grid_size) - 1 # This is the offset of each point in the grid from the centre (which would be index 2,2)
-        neighbour_x += offsets[None, None, :, :]
-        neighbour_y += offsets[None, None, :, :]
-
-        return neighbour
 
 
     def find_grid_old(self, x, y, n=5, scale = 1): #Returns a grid of points around the input points, with n points in each direction
@@ -444,11 +457,15 @@ if __name__ == '__main__':
         for j in range(5):
             c[:,:,i,j] = my_perl.sample(tree_x[:,:,i,j], tree_y[:,:,i,j], ndims=1)[:,:,0]
     print(c.shape)
-    chosen_neighbours = my_perl.check_inner_grid(c)
-    print(chosen_neighbours.shape)
+    chosen_idx_x, chosen_idx_y = check_inner_grid(c)
+    chosen_x = index_within_subgrid(tree_x, chosen_idx_x, chosen_idx_y)
+    chosen_y = index_within_subgrid(tree_y, chosen_idx_x, chosen_idx_y)
+    print(chosen_x.shape)
 
-
-
+    spline_start_x = tree_x[...,1:-1,1:-1]
+    spline_start_y = tree_y[...,1:-1,1:-1]
+    spline_points = generate_spline_points(spline_start_x, spline_start_y, chosen_x, chosen_y, n_points=10)
+    print(spline_points.shape)
     #flatten the tree entries to a single list of points per input point of x, y
     tree_x = tree_x.reshape(x.shape[0], x.shape[1], -1)
     tree_y = tree_y.reshape(y.shape[0], y.shape[1], -1)
