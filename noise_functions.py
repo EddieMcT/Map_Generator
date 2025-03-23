@@ -1,43 +1,109 @@
 import numpy as np 
 import math
 from scipy.interpolate import CubicSpline
+import gc
 
 # =========================
 # Helper functions (to move to another file?)
 # =========================
 
-def generate_spline_points(x1, y1, x2, y2, n_points=10, delta=0.05, method = 'count'):
+def generate_spline_points(x1, y1, x2, y2, n_points=10, delta=0.05, method = 'count', control_start_x = None, control_start_y = None, control_end_x = None, control_end_y = None):
     """
     Generate points along a spline between two points.
     For now, this is implemented as a simple linear interpolation (placeholder).
     """
     if method == 'count': #TODO implement other methods (e.g., based on distance)
         t = np.linspace(0, 1, n_points)
-    sx = x1 + t * (x2 - x1)
-    sy = y1 + t * (y2 - y1)
-    return sx, sy
+    spline_x = x1[...,np.newaxis] + t * (x2[...,np.newaxis] - x1[...,np.newaxis])
+    spline_y = y1[...,np.newaxis] + t * (y2[...,np.newaxis] - y1[...,np.newaxis])
+
+    return spline_x, spline_y
 
 def find_nearest_points(x, y, candidate_x, candidate_y):
     #Given query points (x, y) (of any shape) and a set of candidate points per query point (candidate_x, candidate_y),
     #returns nearest tree point coordinates and square distances.
     
-    x_dist = x[:,:,np.newaxis] - candidate_x
-    y_dist = y[:,:,np.newaxis] - candidate_y
-    sq_distances = x_dist**2 + y_dist**2
+    for _ in range(x.ndim-2):  # Add dimensions for broadcasting in the case that input query points have many points per coordinate
+        candidate_x = candidate_x[..., np.newaxis, :]
+        candidate_y = candidate_y[..., np.newaxis, :]
+
+    x_dist = x[...,np.newaxis] - candidate_x
+    y_dist = y[...,np.newaxis] - candidate_y
+    sq_distances = np.add(x_dist**2 , y_dist**2)
     nearest_idx = np.argmin(sq_distances, axis=-1)
 
-    return nearest_idx, sq_distances
+    return nearest_idx, sq_distances**0.5
 
-def index_within_subgrid(val, x, y):
-    # for a 4D array of x,y,x,y (ie a subgrid per point in array) take the values indicated by x (in the last dimension) and y (in the second to last dimension)
-    # Shape of val is (a,b,c,d), shape of x, y, and output = (a,b,e,f)
+def bezier_points(t, p0, p1, p2, p3):
+    # For an array of input control points and an array of values of t, computes locations along cubic Bezier curve for each t value for each set of control points
+    # Control points are assumed to be of the same (arbitrary) shape (e.g., 3D vectors), eg (a,b,..., n)
+    # t is assumed to be one-dimensional array or list (e.g., np.linspace(0,1,num_points))
+    # output is of shape (a,b,...,n,num_points) where n is the number of dimensions for each control point (e.g., 3 for 3D vectors)
+    t3 = np.power(t,3)
+    t2 = np.power(t,2)
+    t0 = np.ones_like(t)
+    return ((-p0 + 3*p1 - 3*p2 + p3)[..., np.newaxis]*t3
+            + (p0 - 2*p1 + p2)[..., np.newaxis]*t2*3
+            + (p1 -p0 )[..., np.newaxis] *t*3
+            + p0[..., np.newaxis]*t0)
+def bezier_tangents(t, p0, p1, p2, p3):
+    # For an array of input control points and an array of values of t, computes directions along cubic Bezier curve for each t value for each set of control points
+    # Control points are assumed to be of the same (arbitrary) shape (e.g., 3D vectors), eg (a,b,..., n)
+    # t is assumed to be one-dimensional array or list (e.g., np.linspace(0,1,num_points))
+    # output is of shape (a,b,...,n,num_points) where n is the number of dimensions for each control point (e.g., 3 for 3D vectors)
+    t2 = np.power(t,2)
+    t0 = np.ones_like(t)
+    return ((-p0 + 3*p1 - 3*p2 + p3)[..., np.newaxis]*t2*3 # Polynomial form
+            + (p0 - 2*p1 + p2)[..., np.newaxis]*t*6
+            + (p1 -p0)[..., np.newaxis]*t0*3
+            )
+
+def subdivide_bezier(p0, p1, p2, p3, num_segments=2, mode = "cubic"):
+    # Given start and end points of a bezier curve with control points in between, subdivides it into num_points segments.
+    # Returns series of coordinates of nodes for each segment as well as the direction of the curve at that point to be used later control points.
+    
+    t = np.linspace(0, 1, num_segments+1)
+    scale_factor = 1/ (3*num_segments)
+
+    if mode == 'linear':
+        points = p0[..., np.newaxis]*(1-t) + p3[..., np.newaxis]*t
+        tangents = p1[..., np.newaxis]*(1-t) + p2[..., np.newaxis]*t
+    elif mode == 'cubic':
+        points = bezier_points(t, p0, p1, p2, p3)
+        # tangent directions for each new point (in the forward direction)
+        tangents = bezier_tangents(t, p0, p1, p2, p3)
+
+    start_points = points[..., :-1]
+    end_points = points[..., 1:]
+    start_control =  start_points + tangents[..., :-1]* scale_factor
+    end_control = end_points - tangents[..., 1:]* scale_factor 
+
+    return(start_points, end_points, start_control, end_control)
+
+
+
+def index_within_subgrid(val, z, w=None, offset_z = 0, offset_w = 0, mask_value = -9999):
+    # for a 4D array of x,y,z,w (ie a subgrid per point in array) take the values indicated by z (in the last dimension) and w (in the second to last dimension)
+    # val is therefore candidate values, and z*w indicate the correct candidate per xy point
+    # Shape of val is (a,b,c,d), shape of z, w, and output = (a,b,e,f)
+    # for a 3d array of x,y,z take the values indicated by z (in the last dimension) only
+    # When the indices are not valid (ie outside the size of val), they should be masked out with a value that is not in val (like -9999). This can then be used to mask invalid indices.
 
     # Create two placeholder arrays, values = 0:a and 0:b, to index the first two (outer) axes and allow for fancy indexing
     index_1, index_2 = np.ogrid[:val.shape[0], :val.shape[1]]
     #Project these along the later axes to match output shape
-    index_1 = np.broadcast_to(index_1[:,:,np.newaxis, np.newaxis], x.shape)
-    index_2 = np.broadcast_to(index_2[:,:,np.newaxis, np.newaxis], x.shape)
-    return(val[index_1, index_2, y,x])
+    if w is not None: # 4 dimensional case
+        index_1 = np.broadcast_to(index_1[:,:,np.newaxis, np.newaxis], z.shape)
+        index_2 = np.broadcast_to(index_2[:,:,np.newaxis, np.newaxis], z.shape)
+
+        return ( np.where( ((z >= -offset_z) & (w >= -offset_w)) & ((z < (val.shape[3]-offset_z)) & (w < (val.shape[2]-offset_w))), 
+                          val[index_1, index_2, np.minimum(val.shape[2]-1, np.maximum(0,w+offset_w)),  np.minimum(val.shape[3]-1, np.maximum(0,z+offset_z))], # Needed to made indexing possible even in cases where its replaced with the mask value
+                          mask_value))
+        
+    else: # 3 dimensional case
+        index_1 = np.broadcast_to(index_1[:,:,np.newaxis], z.shape)
+        index_2 = np.broadcast_to(index_2[:,:,np.newaxis], z.shape)
+        return (np.where( (z < (val.shape[2]-offset_z)) & (z >= -offset_z), val[index_1, index_2,np.minimum(val.shape[2]-1, np.maximum(0,z+offset_z))], mask_value))
 
 def check_inner_grid(c = None):
     # For each of the inner 3*3 grid points in a 5*5 matrix, find which of its eight neighbours has the lowest value of c
@@ -86,25 +152,39 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
         for i in range(ndims):
             output[i] = 0.5 - ((x*(y+i+3)*7717 + y*(x+10*i)*7907*7717)%primes[i])/primes[i] #Pseudorandom output between -0.5 and 0.5
         return(output)
-    def find_grid(self, x, y, n=5, scale=1.0, epsilon=0.5, frequency = 1000):
+    def find_grid(self, x, y, n=5, scale=1.0, epsilon=0.5, frequency = 1000, rotation = 0): # TODO REVIEW FOR EFFICIENCY
         # Generate a grid of jittered points around each input (x,y).
         # x and y are assumed to have shape (res, res).
         # Returns tree_x and tree_y with shape (res, res, n, n).
 
         # Generate a regular grid of points centered around 0. The set of offsets is the same in x and y
         #offsets = np.linspace(-0.5,0.5,n, endpoint=False) * scale*n
-        offsets = np.linspace(-(n-1)/2, (n-1)/2, n) * scale #check this line for different n
-        
+        grid_centroids_x = np.multiply(x,frequency)
+        grid_centroids_y = np.multiply(y,frequency)
+        offsets = np.linspace(-(n-1)/2, (n-1)/2, n) # * scale
+
         # Expand x and y to shape (res, res, n, n) including added offsets of (n*n)
-        x_exp = np.stack([np.stack([x for _ in range(n)], axis=-1)+offset for offset in offsets], axis = -1)
-        y_exp =np.stack([np.stack([y+offset for offset in offsets], axis = -1) for _ in range(n)], axis=-1)
-        
+        offset_x, offset_y = np.meshgrid(offsets, offsets)
+        grid_centroids_x = np.add(grid_centroids_x[..., np.newaxis, np.newaxis], offset_x[np.newaxis, np.newaxis, ...])
+        grid_centroids_y = np.add(grid_centroids_y[..., np.newaxis, np.newaxis], offset_y[np.newaxis, np.newaxis, ...])
         # Compute jitter based on the pattern function
-        jitter = self.pattern(x_exp*frequency, y_exp*frequency, ndims=2) #having a grid size close to one means that cells receive the same jitter as their neighbours, as they are falling into the same bins in the pattern. 
+        #jitter = self.pattern(x_exp*frequency, y_exp*frequency, ndims=2) #having a grid size close to one means that cells receive the same jitter as their neighbours, as they are falling into the same bins in the pattern. 
         #Frequency upsamples that so that nearby cells are less likely to have the same jitter
-        x_exp += epsilon*jitter[:, :,:,:, 0]
-        y_exp += epsilon*jitter[:, :,:,:, 1]
-        return x_exp, y_exp
+        
+        jitter = self.pattern(grid_centroids_x, grid_centroids_y, ndims=2) 
+
+        # Rotate the jitter (Note: grid is not currently being rotated, so the effect of this is not very pronounced)
+        sin = self.sin_lut[rotation]
+        cos = self.cos_lut[rotation]
+        jitter_x = (cos*jitter[:, :,:,:, 0] - sin*jitter[:, :,:,:, 1])  * epsilon 
+        jitter_y = (sin*jitter[:, :,:,:, 0] + cos*jitter[:, :,:,:, 1]) * epsilon 
+        # Constant offset of 0.5 so that points are centred within their grid spaces
+        grid_centroids_x = np.floor(grid_centroids_x)+0.5
+        grid_centroids_y = np.floor(grid_centroids_y)+0.5
+        grid_centroids_x = np.add(grid_centroids_x,jitter_x)/frequency
+        grid_centroids_y = np.add(grid_centroids_y,jitter_y)/frequency
+
+        return grid_centroids_x, grid_centroids_y
 
 
 
@@ -310,7 +390,8 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
                 
                 sqdist = np.minimum(sqdist, centroid)#If this centroid is closer than previous, keep this distance (always a closest neighbour search, second closest neighbour not used here
         return(np.sqrt(sqdist)[:,:,None])
-    def voron(self,x,y,randomness = 0.5): #Create a voronoi (or Worley noise) pattern from the same starting pattern, returning distance to nearest centroid
+    def voron(self,x,y,randomness = 0.5): # TODO check whether this can be changed to use find grid and/or check inner grid
+        # Create a voronoi (or Worley noise) pattern from the same starting pattern, returning distance to nearest centroid
         lox = np.floor(x)
         loy = np.floor(y)
         frac = np.stack([x%1, y%1], axis = -1)
@@ -449,38 +530,186 @@ class fractal_julia():
             
         return (height)
 if __name__ == '__main__':
-    x, y = np.meshgrid(np.linspace(0, 10, 4, endpoint=False), np.linspace(0, 10, 3))
-    tree_x, tree_y = my_perl.find_grid(x, y, n=5, scale=1.0, epsilon=0.25)
+    import cv2
+    x_size = 256
+    y_size = 256
+    subsamples = 3
+    base_frequency = 1
+    epsilon = 0.245
+    dendry_layers = 2
+    final_sample = 10
+
+    skew = -0.5
+    initial_method = 'b'
+
+    graphical_debug = False # Whether to show the intermediate results of each layer
+    control_function = None
+    eval_per_tier = False # Whether to perform distance calculations of new points to each previous tier in succession vs all at once.
+    # This is slower but should result in more even memory usage
+
+    x, y = np.meshgrid(np.linspace(0, 4, x_size), np.linspace(0, 4, y_size))
+    # First tier of Dendry function
+    base_grid_size = 7
+    tree_x, tree_y = my_perl.find_grid(x, y, n=base_grid_size, epsilon=epsilon, frequency=base_frequency, rotation=1)
     #print(tree_x.shape, tree_y.shape) #(3, 4, 5, 5) (3, 4, 5, 5)
     c = np.zeros_like(tree_x)
-    for i in range(5):
-        for j in range(5):
-            c[:,:,i,j] = my_perl.sample(tree_x[:,:,i,j], tree_y[:,:,i,j], ndims=1)[:,:,0]
-    print(c.shape)
-    chosen_idx_x, chosen_idx_y = check_inner_grid(c)
-    chosen_x = index_within_subgrid(tree_x, chosen_idx_x, chosen_idx_y)
-    chosen_y = index_within_subgrid(tree_y, chosen_idx_x, chosen_idx_y)
-    print(chosen_x.shape)
+    #c = 0.2*tree_x - 0.15*tree_y # Placeholder for control function
+    for i in range(base_grid_size): 
+        for j in range(base_grid_size):
+            if control_function is None:
+                c[:,:,i,j] = 1.75*tree_x[:,:,i,j] + 0.15*tree_y[:,:,i,j] + my_perl.sample(tree_x[:,:,i,j], tree_y[:,:,i,j], ndims=1)[:,:,0] 
+    
+    chosen_idx_x, chosen_idx_y = check_inner_grid(c) # shape = rx, ry, 5,5, indices from 0 to 6 for tree_x and tree_y
+    # Select points for first tier of splines
+    # P0
+    spline_start_x = tree_x[...,2:-2,2:-2]
+    spline_start_y = tree_y[...,2:-2,2:-2]
+    # P3
+    spline_end_x = index_within_subgrid(tree_x, chosen_idx_x[...,1:-1,1:-1], chosen_idx_y[...,1:-1,1:-1])
+    spline_end_y = index_within_subgrid(tree_y, chosen_idx_x[...,1:-1,1:-1], chosen_idx_y[...,1:-1,1:-1])
+    # P6, aka the endpoint of the next spline that would start from p3
+    # Target nodes from each end node are the forward direction and need to be reversed
+    chosen_of_target_x = index_within_subgrid(chosen_idx_x, chosen_idx_x, chosen_idx_y, offset_z=-1, offset_w=-1, mask_value=chosen_idx_x)[...,1:-1,1:-1] # NB these are indices only, not the coordinates
+    chosen_of_target_y = index_within_subgrid(chosen_idx_y, chosen_idx_x, chosen_idx_y, offset_z=-1, offset_w=-1, mask_value=chosen_idx_y)[...,1:-1,1:-1]
+    spline_end_target_x = index_within_subgrid(tree_x, chosen_of_target_x, chosen_of_target_y)
+    spline_end_target_y = index_within_subgrid(tree_y, chosen_of_target_x, chosen_of_target_y)
+    # P2
+    spline_end_control_x = (1+skew)*spline_end_x - skew*spline_end_target_x
+    spline_end_control_y = (1+skew)*spline_end_y - skew*spline_end_target_y
 
-    spline_start_x = tree_x[...,1:-1,1:-1]
-    spline_start_y = tree_y[...,1:-1,1:-1]
-    spline_points = generate_spline_points(spline_start_x, spline_start_y, chosen_x, chosen_y, n_points=10)
-    print(spline_points.shape)
-    #flatten the tree entries to a single list of points per input point of x, y
-    tree_x = tree_x.reshape(x.shape[0], x.shape[1], -1)
-    tree_y = tree_y.reshape(y.shape[0], y.shape[1], -1)
-    #print(tree_x.shape) #(3, 4, 25)
-    nearest_in_tree, dist = find_nearest_points(x, y, tree_x, tree_y)
-    #print(nearest_in_tree.shape) #(3,4)
-    #print(dist.shape) #(3,4,25)
-    #Select entry from dist indexed by nearest_in_tree
-    dist = dist[np.arange(dist.shape[0])[:,None], np.arange(dist.shape[1]), nearest_in_tree]
+    # P1, there are a few options here. B is the default, and gives slightly strange results but guarantees smooth joins (direction matches between segments)
+    if initial_method == 'a':
+        spline_start_control_x = (1-skew) * spline_start_x + skew*(2*spline_end_x - spline_end_target_x)
+        spline_start_control_y = (1-skew) * spline_start_y + skew*(2*spline_end_y - spline_end_target_y)
+    elif initial_method == 'b':
+        spline_start_control_x = (1-skew) * spline_start_x + skew*spline_end_x
+        spline_start_control_y = (1-skew) * spline_start_y + skew*spline_end_y
+    elif initial_method == 'c':
+        spline_start_control_x = spline_start_x + skew*(spline_end_target_x - spline_end_x)
+        spline_start_control_y = spline_start_y + skew*(spline_end_target_y - spline_end_y)
+    
+    if graphical_debug: # Debug only: Visualising (distances from) the base grid points
+        print(tree_x[...,1:-1,1:-1].shape)
+        tree_x = tree_x[...,1:-1,1:-1].reshape(x.shape[0], x.shape[1], -1)
+        tree_y = tree_y[...,1:-1,1:-1].reshape(y.shape[0], y.shape[1], -1)
+        nearest_in_tree, dist = find_nearest_points(x, y, tree_x, tree_y)
+        dist = np.min(dist, axis=-1)
+        cv2.imshow('Distance Heatmap',  dist/np.max(dist))
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+    # Calculate points along cubic splines. The branches will always use cubic splines as their basis, therefore a direction per point is also needed as a control point
+    # For the first tier, the control point of the start is by default the endpoint of that segment, meaning that a branch will always first point towards its next node (before deviating due to that node's own endpoint)
+    # TODO add an option for the normal of the control function to alter this initial control point.
+    spline_points_x, spline_end_x, spline_start_control_x, spline_end_control_x = subdivide_bezier(p0 = spline_start_x, p1 = spline_start_control_x, p2 = spline_end_control_x, p3 = spline_end_x, num_segments=subsamples)
+    spline_points_y, spline_end_y, spline_start_control_y, spline_end_control_y = subdivide_bezier(p0 = spline_start_y, p1 = spline_start_control_y, p2 = spline_end_control_y, p3 = spline_end_y, num_segments=subsamples)
 
-    print(dist.shape)
+
+    # Store this tier's points in the tree for the next tier
+    tree_size = subsamples*9
+    new_shape = (x.shape[0], x.shape[1], tree_size)
+    tree_start_x = spline_points_x.reshape(new_shape)
+    tree_start_y = spline_points_y.reshape(new_shape)
+    tree_target_x = spline_start_control_x.reshape(new_shape)
+    tree_target_y = spline_start_control_y.reshape(new_shape)
+    tree_end_control_x = spline_end_control_x.reshape(new_shape)
+    tree_end_control_y = spline_end_control_y.reshape(new_shape)
+    tree_end_x = spline_end_x.reshape(new_shape)
+    tree_end_y = spline_end_y.reshape(new_shape)
+
+    #spline_points_x = spline_points_x.reshape(x.shape[0], x.shape[1], subsamples*9)
+    #spline_points_y = spline_points_y.reshape(y.shape[0], y.shape[1], subsamples*9)
+    nearest_in_tree, dist = find_nearest_points(x, y, tree_start_x, tree_start_y)
+    dist = np.min(dist, axis=-1)
+    # Debug only: plot the distance as a greyscale image for each point in x, y
+    if graphical_debug:
+        cv2.imshow('Distance Heatmap tier 0', dist/np.max(dist))
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+    dist_per_tier = dist[..., np.newaxis] 
+    # Add a new axis to the distance array for concatenation of tier distances, to later add per-tier weightings (so that certain regions can have higher or lower degrees of branching)
+
+    del(chosen_idx_x, chosen_idx_y, chosen_of_target_x, chosen_of_target_y)
+    gc.collect()
+
+    for i in range(1,dendry_layers): # Calculate higher tiers
+        # Generate 9*9 grid in next smaller size, from which to draw lines to existing tree
+        spline_start_x, spline_start_y = my_perl.find_grid(x, y, n=3, epsilon=epsilon, frequency=base_frequency*2**i, rotation=i) 
+        spline_start_x = spline_start_x.reshape(x.shape[0], x.shape[1], 9)
+        spline_start_y = spline_start_y.reshape(y.shape[0], y.shape[1], 9)
+
+        # Find nearest existing tree points for each of this new grid
+        if eval_per_tier:
+            dist_min_so_far = np.zeros_like(spline_start_x) + float('inf') # Initialize minimum distance to infinity for each point in the new grid
+
+            nearest_so_far = np.zeros_like(spline_start_x)
+            for j in range(i):
+                nearest_in_tree, dist_min = find_nearest_points(spline_start_x, spline_start_y, tree_x[:,:,9*subsamples*j:9*subsamples*(j+1)], tree_y[:,:,9*subsamples*j:9*subsamples*(j+1)]) 
+                dist_min = np.min(dist_min, axis=-1)
+                nearest_so_far = np.where(dist_min < dist_min_so_far, nearest_in_tree + 9*subsamples*j, nearest_so_far)
+                dist_min_so_far = np.minimum(dist_min, dist_min_so_far)
+            nearest_in_tree = nearest_so_far.astype(int)
+        else:
+            nearest_in_tree, dist = find_nearest_points(spline_start_x, spline_start_y, tree_start_x, tree_start_y) 
+        spline_end_x = index_within_subgrid(tree_start_x, nearest_in_tree)
+        spline_end_y = index_within_subgrid(tree_start_y, nearest_in_tree)
+        spline_end_control_x = (1+skew)*spline_end_x - skew*index_within_subgrid(tree_target_x, nearest_in_tree)
+        spline_end_control_y = (1+skew)*spline_end_y - skew*index_within_subgrid(tree_target_y, nearest_in_tree)
+        spline_start_control_x = (1-skew) * spline_start_x + skew*spline_end_x
+        spline_start_control_y = (1-skew) * spline_start_y + skew*spline_end_y
 
 
-    #proofread and test out new functions: 
-    # my_perl.dendry, doublecheck iijj loop for spline generation
-    # my_perl.find_grid, does it use the pattern correctly? Checked, successful
-    #find_nearest_points, does it work correctly? Checked, successful
-    #generate_spline_points
+        # Connect this tier's grid to the existing tree and subdivide
+        tree_start_x = np.concatenate((tree_start_x, spline_start_x.copy()), axis=-1)
+        tree_start_y = np.concatenate((tree_start_y, spline_start_y.copy()), axis=-1)
+        tree_target_x = np.concatenate((tree_target_x,spline_start_control_x.copy()), axis=-1)
+        tree_target_y = np.concatenate((tree_target_y, spline_start_control_y.copy()), axis=-1)
+        tree_end_control_x = np.concatenate((tree_end_control_x, spline_end_control_x.copy()), axis = -1)
+        tree_end_control_y = np.concatenate((tree_end_control_y, spline_end_control_y.copy()), axis = -1)
+        tree_end_x = np.concatenate((tree_end_x, spline_end_x.copy()), axis=-1)
+        tree_end_y = np.concatenate((tree_end_y, spline_end_y.copy()), axis=-1)
+
+        # Subdivide all bezier curves in the tree into multiple segments
+        #del(spline_start_control_x, spline_end_control_x, spline_start_control_y, spline_end_control_y)
+        #del(spline_start_x, spline_end_x, spline_start_y, spline_end_y)
+        #gc.collect()
+        spline_points_x, spline_end_x, spline_start_control_x, spline_end_control_x = subdivide_bezier(p0 = tree_start_x, p1 = tree_target_x, p2 = tree_end_control_x, p3 = tree_end_x, num_segments=subsamples, mode='cubic')
+        spline_points_y, spline_end_y, spline_start_control_y, spline_end_control_y = subdivide_bezier(p0 = tree_start_y, p1 = tree_target_y, p2 = tree_end_control_y, p3 = tree_end_y, num_segments=subsamples, mode='cubic')
+
+        # Store the subdivided points in the tree for the next tier
+        tree_size = subsamples*(tree_size+9) # Update the size of the tree, at each tier we add a new grid of 9, then subsample everything again
+        new_shape = (x.shape[0], x.shape[1], tree_size)
+        tree_start_x = spline_points_x.reshape(new_shape)
+        tree_start_y = spline_points_y.reshape(new_shape)
+        tree_target_x = spline_start_control_x.reshape(new_shape)
+        tree_target_y = spline_start_control_y.reshape(new_shape)
+        tree_end_control_x = spline_end_control_x.reshape(new_shape)
+        tree_end_control_y = spline_end_control_y.reshape(new_shape)
+        tree_end_x = spline_end_x.reshape(new_shape)
+        tree_end_y = spline_end_y.reshape(new_shape)
+
+        #nearest_in_tree, dist = find_nearest_points(x, y, spline_start_x, spline_start_y) #
+        #dist = np.min(dist, axis=-1)
+        #dist_per_tier = np.concatenate((dist_per_tier, dist[..., np.newaxis]*2**i), axis=-1)  # stack with previous tier distances
+        
+        if graphical_debug:
+            cv2.imshow(f'Distance Heatmap tier {i}', dist/np.max(dist))
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+    
+    spline_points_x, spline_end_x, spline_start_control_x, spline_end_control_x = subdivide_bezier(p0 = tree_start_x, p1 = tree_target_x, p2 = tree_end_control_x, p3 = tree_end_x, num_segments=final_sample, mode='cubic')
+    spline_points_y, spline_end_y, spline_start_control_y, spline_end_control_y = subdivide_bezier(p0 = tree_start_y, p1 = tree_target_y, p2 = tree_end_control_y, p3 = tree_end_y, num_segments=final_sample, mode='cubic')
+    del(spline_start_control_x, spline_end_control_x, spline_start_control_y, spline_end_control_y,spline_end_x,spline_end_y)
+    #del(tree_start_x, tree_start_y, tree_target_x, tree_target_y, tree_end_control_x, tree_end_control_y, tree_end_x, tree_end_y)
+    gc.collect()
+    tree_size = tree_size*final_sample # Update the size of the tree, at each tier we add a new grid of 9, then subsample everything again
+    new_shape = (x.shape[0], x.shape[1], tree_size)
+    nearest_in_tree, dist = find_nearest_points(x, y, spline_points_x.reshape(new_shape), spline_points_y.reshape(new_shape))
+    #nearest_in_tree, dist = find_nearest_points(x, y, tree_start_x, tree_start_y)
+
+    final_dist = np.min(dist, axis=-1)  # Find the minimum distance for each pixel across all tiers
+
+    cv2.imshow('Final Distance Heatmap', final_dist/np.max(final_dist))
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
