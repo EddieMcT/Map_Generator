@@ -11,7 +11,7 @@ my_landscape.heights = np.asarray([-1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.
 c_x =0 #Offset of the map from world center
 c_y = 0
 zoom = 1#Relative zoom, 1 = whole world without boundaries
-res = 128#resolution in each direction
+res = 1024#resolution in each direction
 
 min_pos = landscape_sca//2 - landscape_sca//(2*zoom)
 max_pos = landscape_sca//2 + landscape_sca//(2*zoom)
@@ -26,4 +26,4 @@ base, mountains, Z = my_landscape.get_height(X,Y, offs = 1.0, fine_offs =1.0, mo
 
 print(np.min(Z))
 print(np.max(Z))
-Z = normalize(Z, "out_close_2801.png")
+Z = normalize(Z, "out_close_2506.png")

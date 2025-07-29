@@ -86,3 +86,8 @@ def normalize(Z, name = None): # normalizes Z to [0,1] and converts to uint16
     if name is not None:
         cv2.imwrite(name, Z)
     return Z
+def check_layer(sample_slice, layer1=-1, layer2=-1):
+    print(sample_slice.shape) 
+    print(sample_slice.min(), sample_slice.max())
+    ax = plt.imshow(sample_slice[...,layer1,layer2])
+    plt.show()

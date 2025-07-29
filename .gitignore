@@ -153,7 +153,11 @@ cython_debug/
 
 #Personal notes
 whiteboard.py
+whiteboard.ipynb
 landscape_generator.ipynb
-
+notes_for_presentations/
 #Profiling
 performance_history/
+
+
+.conda/
