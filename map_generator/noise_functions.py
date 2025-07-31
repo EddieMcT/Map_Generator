@@ -1,4 +1,4 @@
-import backend_switch as np
+import map_generator.backend_switch as np
 import math
 # from scipy.interpolate import CubicSpline
 import gc
@@ -274,7 +274,7 @@ def find_distances(x,y,x0,x1,x2,x3,y0,y1,y2,y3, upres=1, weight_t = 0.0):
     return dists
 
 
-def broaden_channels(dists_full, intensity):
+def broaden_channels(dists_full, intensity, base_scale=1):
     """Broadens the near-zero regions of the input distance maps per layer.
     Result has a derivative of near 0 at low values, and approaches original values at high values.
 
@@ -298,7 +298,7 @@ def broaden_channels(dists_full, intensity):
 
     # Scale intensities to a suitable range for frequencies of the noise function, based on artistic preference when adjusting in Blender, may need to be adapted later for scales other than 1
     intensities_per_layer =intensities_per_layer*0.5  + intensity[..., np.newaxis] + 0.2
-    intensities_per_layer = intensities_per_layer*250
+    intensities_per_layer = intensities_per_layer*250*base_scale
     rescaled_dists = np.multiply(dists_full, intensities_per_layer)
 
     weightings_broaden = 1 - rescaled_dists
@@ -313,11 +313,12 @@ def broaden_channels(dists_full, intensity):
 
     return dists_full
 
-def softcap_heights(dists_full, intensity):
+def softcap_heights(dists_full, intensity, base_scale=1):
     """Flattens the distance maps so that they asymptotically approach a maximum value at high distances.
-    Function is similar to 1 - 1/(1+x), but with a scaling factor based on the intensity.
-    Derivitave is 1 at low values, and approaches 0 at high values.
-    
+    Function is similar to (1 - 1/(1+cx))/c, with the maximum value c equal to (100*intensity+0.1)*base_scale.
+    Derivative is 1 at low values, and approaches 0 at high values.
+    Output is 0 at low valuess and approaches c at high values.
+
     Parameters
     __________
     dists_full : np.ndarray
@@ -326,7 +327,9 @@ def softcap_heights(dists_full, intensity):
         Intensity values of shape (X, Y) indicating the mountain intensity at each pixel.
         Assumed to be in the range [0, 1].
         Lower values result in lower maximum distances flattening features towards rolling hills, higher values result in higher maximum distances retaining sharp features of original data.
-    
+    base_scale : float
+        Base frequency of the input noise function. Cap values are inversely proportional to this value.
+
     Returns
     _______
     dists_full : np.ndarray
@@ -334,16 +337,15 @@ def softcap_heights(dists_full, intensity):
     """
     intensity = 1 - intensity
     intensity = intensity*100 +0.1 # Convert to a suitable range for frequencies of the noise function (avoiding zeros), based on artistic preference when adjusting in Blender, may need to be adapted later for scales other than 1
-    intensity = intensity[..., np.newaxis]
-    dists_full = dists_full + 1/intensity  # Add the inverse of intensity to the distance maps
-    dists_full = 1/ dists_full  # Invert the distance maps
-    dists_full = intensity - dists_full
-    dists_full = dists_full/intensity
-    dists_full = dists_full/intensity  # Rescale the distance maps by the square of the intensity
+    intensity = intensity[..., np.newaxis]*base_scale
+
+    dists_full = 1 + dists_full*intensity
+    dists_full = 1 - 1/(dists_full)  # Apply the soft cap function
+    dists_full = dists_full/intensity  # Rescale the distance maps by the maximum intensity
     
     return dists_full
 
-def additive_mode_blending(dists_full, intensity, lacunarity=1.414):
+def additive_mode_blending(dists_full, intensity, lacunarity=1.414, verbose=False):
     """Rescales each layer of the distance maps by a factor based on the intensity and lacunarity then adds and rescales them.
     Rescaling is an artistic choice based on experimentation in Blender, may need to be adapted later for scales other than 1 and lacunarity other than 1.414.
     Helps include detail and variation from all layers, including slopes that result in realistic higher-tier streams at the loss of specific stream shapes.
@@ -362,19 +364,30 @@ def additive_mode_blending(dists_full, intensity, lacunarity=1.414):
     dists_full : np.ndarray
         Additively blended distance map of shape (X, Y).
     """
+    intensity = intensity+1  # Convert intensity to a range [1, 2] to avoid zeros
     intensity = intensity*lacunarity
+    if verbose:
+        print(f"Intensity shape: {intensity.shape}, dists_full shape: {dists_full.shape}, lacunarity: {lacunarity}")
+        print(f"Intensity min: {np.min(intensity)}, max: {np.max(intensity)}")
     intensity_per_layer = intensity[..., np.newaxis]
     intensity_per_layer = np.power(intensity_per_layer, np.arange(dists_full.shape[-1])[np.newaxis, np.newaxis, :]+1) +1 # Intensity is scaled once per layer index, with the first layer being scaled by lacunarity, second by lacunarity squared, and so on, plus one. 
+    
     dists_full = dists_full * intensity_per_layer  # Scale each layer by the intensity factor
+    # rescaling is based on the maximum noise scale, so using only the maximum frequency and the highest power
+    intensity = np.power(intensity, dists_full.shape[-1])+1e-5
     dists_full = np.sum(dists_full, axis=-1)  # Sum the scaled layers
 
-    # rescaling is based on the maximum noise scale, so using only the maximum frequency and the highest power
-    intensity = np.power(intensity, dists_full.shape[-1])+1 # Bias of one to avoid division by zero
+
+    if verbose:
+        print(f"Intensity min: {np.min(intensity)}, max: {np.max(intensity)}")
     dists_full = dists_full/intensity  # Rescale the distance maps by the maximum intensity
+    if verbose:
+        print(f"Intensity min: {np.min(intensity)}, max: {np.max(intensity)}")
+        print(f"dists_full shape: {dists_full.shape}, dists_full min: {np.min(dists_full)}, max: {np.max(dists_full)}")
 
     return dists_full
 
-def minimum_mode_blending(dists_full, intensity, bias_value = 0.005):
+def minimum_mode_blending(dists_full, intensity, bias_value = 0.005, verbose=False):
     """Rescales each layer of the distance maps by a factor based on the intensity and lacunarity then takes the minimum.
     Rescaling is an artistic choice based on experimentation in Blender, may need to be adapted later for scales other than 1 and lacunarity other than 1.414.
     Focuses on keeping the exact shapes of streams, at the cost of losing detail and variation when further away from them
@@ -397,6 +410,9 @@ def minimum_mode_blending(dists_full, intensity, bias_value = 0.005):
     """
     intensity = 1-intensity
     intensity = intensity*bias_value
+    if verbose:
+        print(f"Intensity shape: {intensity.shape}, dists_full shape: {dists_full.shape}, bias_value: {bias_value}")
+        print(f"Intensity min: {np.min(intensity)}, max: {np.max(intensity)}")
 
     intensity_per_layer = intensity[..., np.newaxis]
     intensity_per_layer = intensity_per_layer* np.arange(dists_full.shape[-1])[np.newaxis, np.newaxis, :]
@@ -406,7 +422,7 @@ def minimum_mode_blending(dists_full, intensity, bias_value = 0.005):
 
     return dists_full
 
-def blend_distance_layers(dists_full, intensity, lacunarity=1.414, bias_value=0.005):
+def blend_distance_layers(dists_full, intensity, lacunarity=1.414, bias_value=0.005, base_frequency=1, verbose=False):
     """Blends the distance maps using a combination of additive and minimum mode blending.
     This is an artistic choice based on experimentation in Blender, may need to be adapted later for scales other than 1 and lacunarity other than 1.414.
     Helps include detail and variation from all layers, including slopes that result in realistic higher-tier streams at the loss of specific stream shapes.
@@ -425,17 +441,35 @@ def blend_distance_layers(dists_full, intensity, lacunarity=1.414, bias_value=0.
     bias_value : float
         Amount to add to each layer to shift weighting towards the first layer at lower intensities.
         This is a very slight bias, as it will rapidly cause higher layers to disappear.
+    base_frequency : float
+        Frequency of (the lowest component of) the noise function used to generate the distance maps.
+        Channels will be broadened proportionally to the wavelength of this noise.
     
     Returns
     _______
     blended_dists : np.ndarray
         Blended distance map of shape (X, Y).
     """
-    dists_full = broaden_channels(dists_full, intensity)
-    dists_full = softcap_heights(dists_full, intensity)
-    sum_dists = additive_mode_blending(dists_full, intensity, lacunarity)
-    min_dists = minimum_mode_blending(dists_full, intensity, bias_value)
-    min_dists = np.power(min_dists,0.75) # reshape the minimum mode, again an artistic choice, rather arbitrary but should be something less than 1
+    if verbose:
+        print(f"Blending distance layers with intensity shape: {intensity.shape}, dists_full shape: {dists_full.shape}, lacunarity: {lacunarity}, bias_value: {bias_value}, base_frequency: {base_frequency}")
+        print(f"Intensity min: {np.min(intensity)}, max: {np.max(intensity)}")
+    dists_full = broaden_channels(dists_full, intensity, base_scale=base_frequency) 
+    if verbose:
+        print(f"After broadening channels, dists_full shape: {dists_full.shape}, dists_full min: {np.min(dists_full)}, max: {np.max(dists_full)}")
+        print(f"Intensity min: {np.min(intensity)}, max: {np.max(intensity)}")
+    dists_full = softcap_heights(dists_full, intensity, base_scale=base_frequency)
+    if verbose:
+        print(f"After softcapping heights, dists_full shape: {dists_full.shape}, dists_full min: {np.min(dists_full)}, max: {np.max(dists_full)}")
+        print(f"Intensity min: {np.min(intensity)}, max: {np.max(intensity)}")
+    sum_dists = additive_mode_blending(dists_full, intensity, lacunarity, verbose=verbose)
+    if verbose:
+        print(f"After additive blending, dists_full shape: {dists_full.shape}, dists_full min: {np.min(dists_full)}, max: {np.max(dists_full)}")
+        print(f"Intensity min: {np.min(intensity)}, max: {np.max(intensity)}")
+    min_dists = minimum_mode_blending(dists_full, intensity, bias_value, verbose=verbose)
+    if verbose:
+        print(f"After minimum blending, dists_full shape: {dists_full.shape}, dists_full min: {np.min(dists_full)}, max: {np.max(dists_full)}")
+        print(f"Intensity min: {np.min(intensity)}, max: {np.max(intensity)}")
+    min_dists = np.power(min_dists,0.75) 
     sum_of_modes = (sum_dists + min_dists*2)*0.4/3  # Combine the two modes additively, producing detailed shapes
     product_of_modes = 10*sum_dists * min_dists  # Combine the two modes multiplicatively, retaining 0 values eg streams
 
@@ -445,10 +479,10 @@ def blend_distance_layers(dists_full, intensity, lacunarity=1.414, bias_value=0.
     sum_of_modes = sum_of_modes + product_of_modes  # Combine the two modes additively
 
     return sum_of_modes
-class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already computationally intensive
+class smoothnoise_generator(): 
     
-    def __init__(self,x=128,y=128,max_oct=32):
-        np.random.seed(1)
+    def __init__(self,x=128,y=128,max_oct=32, random_seed=1):
+        np.random.seed(random_seed)
         self.pattern_ref = np.random.rand(x,y,3)*2 -1 #array of random values between -1 and 1
         self.cos_lut = [math.cos(2*i) for i in range(max_oct)] #used instead of calculating trig functions per pixel at runtime
         self.sin_lut = [math.sin(2*i) for i in range(max_oct)]
@@ -511,7 +545,7 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
         #jitter = self.pattern(x_exp*frequency, y_exp*frequency, ndims=2) #having a grid size close to one means that cells receive the same jitter as their neighbours, as they are falling into the same bins in the pattern. 
         #Frequency upsamples that so that nearby cells are less likely to have the same jitter
         
-        jitter = self.pattern(grid_centroids_x, grid_centroids_y, ndims=2) 
+        jitter = self.pattern(grid_centroids_x*scale, grid_centroids_y*scale, ndims=2) 
         grid_centroids_x = grid_centroids_x/frequency
         grid_centroids_y = grid_centroids_y/frequency
 
@@ -522,43 +556,10 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
         grid_centroids_y = np.add(grid_centroids_y,jitter_y/frequency)
         
         return grid_centroids_x, grid_centroids_y
-    def find_grid_old(self, x, y, n=5, scale=1.0, epsilon=0.5, frequency = 1000, rotation = 0): # TODO REVIEW FOR EFFICIENCY
-        # Generate a grid of jittered points around each input (x,y).
-        # x and y are assumed to have shape (res, res).
-        # Returns grid_centroids_x and grid_centroids_y with shape (res, res, n, n).
 
-        # Generate a regular grid of points centered around 0. The set of offsets is the same in x and y
-        #offsets = np.linspace(-0.5,0.5,n, endpoint=False) * scale*n
-        grid_centroids_x = np.multiply(x,frequency)
-        grid_centroids_y = np.multiply(y,frequency)
-        offsets = np.linspace(-(n-1)/2, (n-1)/2, n) # * scale
-
-        # Expand x and y to shape (res, res, n, n) including added offsets of (n*n)
-
-        offset_x, offset_y = np.meshgrid(offsets, offsets)
-        grid_centroids_x = np.add(grid_centroids_x[..., np.newaxis, np.newaxis], offset_x[np.newaxis, np.newaxis, ...])
-        grid_centroids_y = np.add(grid_centroids_y[..., np.newaxis, np.newaxis], offset_y[np.newaxis, np.newaxis, ...])
-        # Compute jitter based on the pattern function
-        #jitter = self.pattern(x_exp*frequency, y_exp*frequency, ndims=2) #having a grid size close to one means that cells receive the same jitter as their neighbours, as they are falling into the same bins in the pattern. 
-        #Frequency upsamples that so that nearby cells are less likely to have the same jitter
-        
-        jitter = self.pattern(grid_centroids_x, grid_centroids_y, ndims=2) 
-
-        # Rotate the jitter (Note: grid is not currently being rotated, so the effect of this is not very pronounced)
-        sin = self.sin_lut[rotation]
-        cos = self.cos_lut[rotation]
-        jitter_x = (cos*jitter[:, :,:,:, 0] - sin*jitter[:, :,:,:, 1])  * epsilon 
-        jitter_y = (sin*jitter[:, :,:,:, 0] + cos*jitter[:, :,:,:, 1]) * epsilon 
-        # Constant offset of 0.5 so that points are centred within their grid spaces
-        grid_centroids_x = np.floor(grid_centroids_x)+0.5
-        grid_centroids_y = np.floor(grid_centroids_y)+0.5
-        grid_centroids_x = np.add(grid_centroids_x,jitter_x)/frequency
-        grid_centroids_y = np.add(grid_centroids_y,jitter_y)/frequency
-        
-        return grid_centroids_x, grid_centroids_y
     def dendry_higher_tiers(self,x,y, dists_full, spline_start_x,spline_start_control_x,spline_end_control_x,spline_end_x, spline_start_y,spline_start_control_y,spline_end_control_y,spline_end_y,
                         base_frequency, epsilon=0.4,skew=0.5, lacunarity=1.414, push_upstream=0.1, push_downstream=0.2, scale_factor_start = 0.250,
-                        soften_start = 0.75, weight_t=0.0 , max_tier=3, upres_tier_max=0, upres=2, verbose=False):
+                        soften_start = 0.75, weight_t=0.0 , max_tier=3, upres_tier_max=0, upres=2, scale=1, verbose=False):
         if verbose:
             print("Generating higher tiers of dendry noise")
             print("Base frequency:", base_frequency)
@@ -574,7 +575,7 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
         skew1 = soften_start*skew
         tier_freq = base_frequency*lacunarity
         for tier in range(1,max_tier+1):
-            new_points_x, new_points_y = self.find_grid(x, y, n=3, epsilon=epsilon, frequency=tier_freq, rotation=tier) 
+            new_points_x, new_points_y = self.find_grid(x, y, n=3, epsilon=epsilon, frequency=tier_freq, rotation=tier, scale=1) 
             new_points_x = inneficient_flatten(new_points_x)
             new_points_y = inneficient_flatten(new_points_y)
             t = closest_point_on_lines(px=new_points_x, py=new_points_y, x0=spline_start_x, y0=spline_start_y, x1=spline_end_x, y1=spline_end_y)
@@ -616,8 +617,8 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
             tangents_x = tangents_x/(tangent_length*tier_freq)
             tangents_y = tangents_y/(tangent_length*tier_freq)
             # construct new beziér curves, compute pixelwise distance for this tier, and append to existing tree
-            tangents_x = skew*tangents_x/tier_freq#*scale_factor_end
-            tangents_y = skew*tangents_y/tier_freq#*scale_factor_end
+            tangents_x = skew*tangents_x#/tier_freq#*scale_factor_end
+            tangents_y = skew*tangents_y#/tier_freq#*scale_factor_end
             # When building into the function, directly scale the tangent values to avoid repitition # in full version, avoid duplication
             
             new_x1 = (1-skew1)*new_points_x + (coords_x)*(skew1) - tangents_x*push_upstream
@@ -664,7 +665,7 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
                dendry_layers = 2, upres = 2, final_sample = 10, initial_method = 'b', upres_tier_max = 0,
                base_frequency = 1, epsilon = 0.4, skew = 0.5, lacunarity = 1.414, push_upstream = 0.1, push_downstream = 0.2,
                scale_factor_start = 0.250, soften_start = 0.75, weight_t=0.0, bias_value=0.005, verbose = False,
-               control_function=None, **kwargs):
+               control_function=None, return_full = False, scale=1, blend_scale=1, **kwargs):
         """
         Generate dendry (river) noise for input coordinates x, y (shape: (res, res)).
         
@@ -685,10 +686,11 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
             is found and a spline is generated between them.
         
         Finally, the function computes, for each evaluation point, the minimum distance to any
-        spline sample point in the union of all splines, and returns this distance field.
+        spline sample point in the union of all splines blended with the sum of these distances, and returns this distance field.
         """
 
         # First tier
+        # skew = skew*(base_frequency**0.75)
         if verbose:
             print("Generating first tier of dendry noise")
             print("Base frequency:", base_frequency)
@@ -703,7 +705,7 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
             print("Upres", upres)
             print("bias value:", bias_value)
         base_grid_size = 7
-        tree_x, tree_y = self.find_grid(x, y, n=base_grid_size, epsilon=epsilon, frequency=base_frequency, rotation=1)
+        tree_x, tree_y = self.find_grid(x, y, n=base_grid_size, epsilon=epsilon, frequency=base_frequency, rotation=1, scale=scale)
         if verbose:
             print("Tree shape:", tree_x.shape, tree_y.shape)
         # find values of initial points according to the control function
@@ -748,7 +750,7 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
         elif initial_method == 'd':
             spline_start_control_x = (2-skew) * spline_start_x + (1+skew)*spline_end_x
             spline_start_control_y = (2-skew) * spline_start_y + (1+skew)*spline_end_y
-        # Flatten all sets of points to m*n*9
+        # Flatten all sets of points to m*n*9 and rescale to base frequency so that the control function values are in the original space but all splines are at the desired frequency
         spline_start_x = inneficient_flatten(spline_start_x)
         spline_start_control_x = inneficient_flatten(spline_start_control_x)
         spline_end_control_x = inneficient_flatten(spline_end_control_x)
@@ -785,15 +787,18 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
                                  upres=upres,
                                  push_downstream=push_downstream, 
                                  soften_start = soften_start, scale_factor_start = scale_factor_start,
-                                 weight_t=weight_t, max_tier=dendry_layers, upres_tier_max=upres_tier_max, verbose=verbose)
-        if intensity is None: #If intensity is not given, or is a single value, use a default intensity
-            intensity = np.ones_like(x)*0.5
-        elif np.isscalar(intensity): #If intensity is a single value, use it for all pixels
-            intensity = np.ones_like(x)*intensity
-        blended_dists = blend_distance_layers(dists_full, intensity, lacunarity=lacunarity, bias_value=bias_value)
-        return blended_dists
+                                 weight_t=weight_t, max_tier=dendry_layers, upres_tier_max=upres_tier_max, verbose=verbose, scale=scale)
+        if return_full:
+            return dists_full
+        else:
+            if intensity is None: #If intensity is not given, or is a single value, use a default intensity
+                intensity = np.ones_like(x)*0.5
+            elif np.isscalar(intensity): #If intensity is a single value, use it for all pixels
+                intensity = np.ones_like(x)*intensity
+            blended_dists = blend_distance_layers(dists_full, intensity, lacunarity=lacunarity, bias_value=bias_value/base_frequency, base_frequency=base_frequency*blend_scale)
+            return blended_dists
 
-    def base_sample(self,x,y,**kwargs): #ADD PERLIN SAMPLER HERE, currently simple interpolation
+    def base_sample(self,x,y,**kwargs): # currently simple interpolation, not true perlin noise
         lox = np.floor(x)
         loy = np.floor(y)
         a = self.pattern(lox,loy,**kwargs)
@@ -877,7 +882,7 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
             for y_off in range(-1,3):
                 #get the random offset of that location in the pattern. Pattern is -1 to 1, scale by 0.5 keeps points from overlapping
                 centroid = self.pattern(lox + x_off, loy + y_off,ndims = 2)
-                centroid += [x_off, y_off]
+                centroid += np.asarray([x_off, y_off])
                 centroid = np.subtract(frac, centroid)#calculate vector between this centroid and the sampled location
                 
                 centroid = np.square(centroid)
@@ -887,22 +892,6 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
         return(np.sqrt(sqdist)[:,:,None])
     
     
-    def voron_old(self,x:float,y:float,randomness = 0.5) -> float: #DEPRECATED:, works with non-vectorised inputs
-        loc = np.asarray([x,y]) #Actual location of sampled point within the pattern (looped over x and y limits of pattern)
-        x = math.floor(x)
-        y = math.floor(y)
-        sqdist = 100
-        dist=10 #Instantiate distance as something (hopefully?) larger than all distances
-        for x_off in range(-1,3):
-            for y_off in range(-1,3):
-                centr = np.asarray([x+x_off,y+y_off])
-                centroid = np.add(centr, self.pattern(centr[0],centr[1],2)*randomness) #get the random offset of that location in the pattern. Pattern is -1 to 1, scale by 0.5 keeps points from overlapping
-                centroid = np.add(centroid * -1, loc) #calculate vector between this centroid and the sampled location
-                new_sq = centroid[0]**2 + centroid[1]**2
-                if sqdist > new_sq: #Only calculate real distance is square
-                    sqdist = new_sq
-                    dist = min(dist, np.linalg.norm(centroid))#If this centroid is closer than previous, keep this distance (always a closest neighbour search, second closest neighbour not used here
-        return(dist)
     def profile_base_sample(self, x, y, ndims=3): #Not to be used in production code, only for profiling current version of base_sample
         import time
         # Time each major operation
@@ -947,7 +936,7 @@ class perlin_generator(): #NOTE: this is not yet Perlin noise, but is already co
         
         return s, timings
 
-my_perl = perlin_generator(256,256)
+my_perl = smoothnoise_generator(256,256)
 
 def julia(x,y,c = 1j, n = 5,cap = 2):
     z = x + y*1j
@@ -1006,13 +995,14 @@ class fractal_julia():
             
         return (height)
 if __name__ == '__main__':
+    import cv2
     x_size = 256
     y_size = 256
     zoom = 1.5
     x_off = 100
     y_off = - 100
     subsamples = 2
-    base_frequency = 1
+    base_frequency = 10
     epsilon = 0.4# 0.4 is upper limit on stability. 0.5 is entirely random, but introduces instability
     dendry_layers = 4
     final_sample = 10
@@ -1033,6 +1023,12 @@ if __name__ == '__main__':
     x, y = np.meshgrid(np.linspace(-zoom*0.5, zoom*0.5, x_size), np.linspace(-zoom*0.5, zoom*0.5, y_size))
     x = x + x_off
     y = y + y_off
-    blended_dists = my_perl.dendry(x,y,intensity=0.5, dendry_layers = dendry_layers)
-    
+    blended_dists = my_perl.dendry(x,y,intensity=0.5, dendry_layers = dendry_layers, return_full = True, base_frequency = base_frequency, epsilon = epsilon, skew = skew,)
+    print(blended_dists.shape)
+    for i in range(blended_dists.shape[2]): # save each layer of the blended distances as a greyscale image
+        layer = blended_dists[:,:,i]
+        print(f'Layer {i} min: {np.min(layer)}, max: {np.max(layer)}')
+        layer = np.power(layer, 0.5)*255
+        cv2.imwrite(f'f10_dendry_layer_{i}.png', layer)
+
 

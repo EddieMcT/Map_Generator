@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from noise_functions import my_perl
+from map_generator.noise_functions import my_perl
 
 class TestNoise(unittest.TestCase):
     def test_sample(self):

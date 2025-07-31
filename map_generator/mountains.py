@@ -1,6 +1,6 @@
 import numpy as np
 import math
-from noise_functions import julia, my_perl
+from map_generator.noise_functions import julia, my_perl
 import random
 
 class mountain():

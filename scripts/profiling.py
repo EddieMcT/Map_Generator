@@ -2,8 +2,8 @@ import cProfile
 import memory_profiler
 import time
 import numpy as np
-from noise_functions import my_perl
-from landscape import landscape_gen
+from map_generator.noise_functions import my_perl
+from map_generator.landscape import landscape_gen
 
 class PerlinProfiler:
     def __init__(self):

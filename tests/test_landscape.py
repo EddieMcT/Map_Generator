@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
-from landscape import landscape_gen
-from imaging_functions import normalize
+from map_generator.landscape import landscape_gen
+from map_generator.imaging_functions import normalize
 import os
 import cv2
 
@@ -14,7 +14,7 @@ class TestLandscape(unittest.TestCase):
     def test_get_height(self):
         for res in [16, 128, 256, 512]:   
             X, Y = np.meshgrid(np.linspace(0, 200, res), np.linspace(0, 200, res))
-            base, mountain, Z = self.landscape.get_height(X, Y)
+            base, mountain, Z, _, _ = self.landscape.get_height(X, Y)
             for arr in [base, mountain, Z]:
                 self.assertIsInstance(arr, np.ndarray)
                 self.assertIsNotNone(arr, "Array is None")
@@ -26,7 +26,7 @@ class TestLandscape(unittest.TestCase):
             
         def test_normalize(res = 128): #Included here as it is tied to the output of landscape_gen
             X, Y = np.meshgrid(np.linspace(0, 200, res), np.linspace(0, 200, res))
-            base, mountain, Z = self.landscape.get_height(X, Y)
+            base, mountain, Z, _, _ = self.landscape.get_height(X, Y)
             Z = normalize(Z, "tests/current_test.png")
             self.assertIsInstance(Z, np.ndarray)
             self.assertIsNotNone(Z, "Z is None")
