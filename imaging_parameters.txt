@@ -1,0 +1,4 @@
+Offset X: 0
+Offset Y: 200
+Zoom: 2.5
+Resolution: 128

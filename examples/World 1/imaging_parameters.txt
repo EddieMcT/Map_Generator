@@ -1,0 +1,4 @@
+Offset X: 0
+Offset Y: 0
+Zoom: 1
+Resolution: 1024

@@ -77,6 +77,8 @@ def show_map_3d(gen_obj,img_x,img_y,sca,centre_offset=[0,0],num_samples = 1,vect
     return (X, Y, Z)
 
 def normalize(Z, name = None): # normalizes Z to [0,1] and converts to uint16
+    minimum_val = np.min(Z)
+    maximum_val = np.max(Z)
     Z = Z + -1 * np.min(Z)
     Z = 65535*Z /np.max(Z) - 0
     Z = Z.astype(np.uint16)
@@ -84,7 +86,7 @@ def normalize(Z, name = None): # normalizes Z to [0,1] and converts to uint16
     plt.imshow(Z*0.5 + 0.5)
     plt.show()
     if name is not None:
-        cv2.imwrite(name, Z)
+        cv2.imwrite(f"{name}_max_{maximum_val}_min_{minimum_val}.png", Z)
     return Z
 def check_layer(sample_slice, layer1=-1, layer2=-1):
     print(sample_slice.shape) 

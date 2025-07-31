@@ -1,6 +1,6 @@
 ### Experimental code
 # to quickly test gpu acceleration, uses cupy instead of numpy
-# not expected to work on windows systems, can be enabled for WSL systems
+# not expected to work on windows systems, can be enabled for WSL systems but is untested
 
 gpu_enabled = False
 if gpu_enabled:

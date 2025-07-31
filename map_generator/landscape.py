@@ -42,7 +42,9 @@ class landscape_gen():
         self.river_density = 20
 
     def compute_offsets(self, x, y,offs = 1, fine_offs =1, **kwargs): #consider using a different function for fine_offset
-        offset = my_perl.sample(x,y,neg_octaves = 4, octaves=-1,ndims=2)  ##REFERENCES NOISE, UPDATE AS NECESSARY. Current method with -4 gives range of +-20km (real world ~= 250), each neg_octave doubles this
+        
+        neg_octave = int(np.log2(self.lin_sca)-3) # 4 works for 200km, each doubling above this doubles the range
+        offset = my_perl.sample(x,y,neg_octaves = neg_octave, octaves=-1,ndims=2)  ##REFERENCES NOISE, UPDATE AS NECESSARY. Current method with -4 gives range of +-20km (real world ~= 250), each neg_octave doubles this
         fine_offset = my_perl.sample(x,y,neg_octaves = 1, octaves = 4,ndims=3) #Use ndims=3 for hill noise?
         offset =  np.add(fine_offset[:,:,0:2],offset) * offs
         fine_offset = np.add(fine_offset,my_perl.sample(x,y,neg_octaves = -4, octaves = 8,ndims=3)) * fine_offs
@@ -56,14 +58,14 @@ class landscape_gen():
         freq = self.river_density/self.lin_sca #Frequency of major rivers, 20 across the world (nb not necessarily 20 separate rivers, but 20 points at which they're defined)
         river_z = my_perl.dendry(x=x,y=y, intensity=weight, dendry_layers=5, upres=2, final_sample=10, 
                                  initial_method='b', upres_tier_max=0,
-                                 base_frequency=freq, epsilon=0.4, skew=0.4, lacunarity=1.414, 
+                                 base_frequency=freq, epsilon=0.49, skew=0.45, lacunarity=1.414, 
                                  push_upstream=0.1, push_downstream=0.1,
                                  scale_factor_start=0.75, soften_start = 0.75, weight_t=0.0, 
                                  bias_value = 2, verbose=False, control_function = self.get_base_height,
                                  scale = freq, blend_scale = 1,return_full=True,
                                  include_secondary=False, **kwargs)
         return(river_z)
-    def get_base_height(self, x,y, include_secondary=True,distance_cap = 10,slope_intensity=0.1, **kwargs):
+    def get_base_height(self, x,y, include_secondary=True,distance_cap = 20,slope_intensity=1, **kwargs):
         x = np.array(x)
         y = np.array(y)
         #noise_height = offset[2] #Necessary? May cause tiling depending on noise
@@ -124,7 +126,7 @@ class landscape_gen():
         Z += weight*layer_output/freq
         return(Z)
 
-    def get_height(self, x,y,mountainsca = 1,riversca=0.001,rivernoise=0.2, **kwargs):
+    def get_height(self, x,y,mountainsca = 1,riversca=500,rivernoise=0.2, **kwargs):
         coarse_x, coarse_y, fine_x, fine_y = self.compute_offsets(x,y,**kwargs) 
         #are fine_x and fine_y necessary for anything besides mountains?
         if mountainsca == 0 and riversca == 0:
@@ -132,25 +134,25 @@ class landscape_gen():
             gc.collect()
 
         base, secondary = self.get_base_height(coarse_x, coarse_y,**kwargs)
-        if riversca > 0:
-            freq = self.river_density/self.lin_sca
-            rivers_full = self.get_rivers(fine_x*rivernoise+x*(1-rivernoise),fine_y*rivernoise+y*(1-rivernoise),weight = np.clip(np.abs(secondary), 0, 1), ** kwargs)*freq
-            river_z = blend_distance_layers(rivers_full, intensity = np.clip(np.abs(secondary), 0, 1), 
-                                            lacunarity=1.414, bias_value=0.01/freq,base_frequency=2*freq)
-            river_map = 1 - blend_distance_layers(rivers_full, intensity = np.clip(np.abs(secondary), 0, 1), 
-                                            lacunarity=1.414, bias_value=0.0,base_frequency=2*freq)
-        else:
-            rivers_full = np.zeros((x.shape[0], x.shape[1], 1))
-            river_z = np.zeros_like(base)
-            river_map = np.zeros_like(base)
-        del coarse_x, coarse_y
-        gc.collect()
+        # del coarse_x, coarse_y
+        # gc.collect()
         if mountainsca > 0:
             mountains = self.get_mountain_heights(fine_x, fine_y, secondary,**kwargs)*mountainsca
-            del fine_x, fine_y
-            gc.collect()
+            # del fine_x, fine_y
+            # gc.collect()
             layered = self.layerise(x,y,base+mountains)
         else:
             mountains = np.zeros_like(x)
             layered = self.layerise(x,y,base)
-        return (base, mountains , layered, secondary, rivers_full)
+        if riversca > 0:
+            freq = self.river_density/self.lin_sca
+            rivers_full = self.get_rivers(fine_x*rivernoise+x*(1-rivernoise),fine_y*rivernoise+y*(1-rivernoise),weight = np.clip(np.abs(layered*0.5), 0, 1), ** kwargs)*freq
+            river_z = blend_distance_layers(rivers_full, intensity = np.clip(np.abs(layered*0.5), 0, 1), 
+                                            lacunarity=1.414, bias_value=0.005,base_frequency=2)*riversca/self.river_density
+            river_map = 1 - blend_distance_layers(rivers_full, intensity = np.clip(np.abs(layered*0.5), 0, 1), 
+                                            lacunarity=1.414, bias_value=0.0,base_frequency=2)
+        else:
+            rivers_full = np.zeros((x.shape[0], x.shape[1], 1))
+            river_z = np.zeros_like(base)
+            river_map = np.zeros_like(base)
+        return (base, mountains , layered+river_z, river_map, rivers_full)
