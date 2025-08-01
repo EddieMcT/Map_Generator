@@ -552,6 +552,11 @@ class smoothnoise_generator():
         # Rotate the jitter so that it is within the rotated grid squares
         jitter_x = (c*jitter[:, :,:,:, 0] - s*jitter[:, :,:,:, 1])  * epsilon 
         jitter_y = (s*jitter[:, :,:,:, 0] + c*jitter[:, :,:,:, 1]) * epsilon 
+
+        # # Alternative: turn jitter into polar coordinates in radius epsilon to avoid hitting corners (UNTESTED)
+        # jitter_x = np.sin(jitter_x) * epsilon
+        # jitter_y = np.cos(jitter_y) * epsilon
+
         grid_centroids_x = np.add(grid_centroids_x,jitter_x/frequency)
         grid_centroids_y = np.add(grid_centroids_y,jitter_y/frequency)
         
@@ -575,7 +580,7 @@ class smoothnoise_generator():
         skew1 = soften_start*skew
         tier_freq = base_frequency*lacunarity
         for tier in range(1,max_tier+1):
-            new_points_x, new_points_y = self.find_grid(x, y, n=3, epsilon=epsilon, frequency=tier_freq, rotation=tier, scale=1) 
+            new_points_x, new_points_y = self.find_grid(x, y, n=3,epsilon=epsilon, frequency=tier_freq, rotation=tier, scale=1) 
             new_points_x = inneficient_flatten(new_points_x)
             new_points_y = inneficient_flatten(new_points_y)
             t = closest_point_on_lines(px=new_points_x, py=new_points_y, x0=spline_start_x, y0=spline_start_y, x1=spline_end_x, y1=spline_end_y)

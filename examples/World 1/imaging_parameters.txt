@@ -1,4 +1,4 @@
 Offset X: 0
-Offset Y: 0
-Zoom: 1
-Resolution: 1024
+Offset Y: 50
+Zoom: 4
+Resolution: 512

@@ -54,11 +54,11 @@ class landscape_gen():
         coarse_x = x+offset[:,:,0]
         coarse_y = y+offset[:,:,1]
         return(coarse_x, coarse_y, fine_x, fine_y)
-    def get_rivers(self,x,y,weight=1, **kwargs):
+    def get_rivers(self,x,y,weight=1, lacunarity=1.414, **kwargs):
         freq = self.river_density/self.lin_sca #Frequency of major rivers, 20 across the world (nb not necessarily 20 separate rivers, but 20 points at which they're defined)
         river_z = my_perl.dendry(x=x,y=y, intensity=weight, dendry_layers=5, upres=2, final_sample=10, 
                                  initial_method='b', upres_tier_max=0,
-                                 base_frequency=freq, epsilon=0.49, skew=0.45, lacunarity=1.414, 
+                                 base_frequency=freq, epsilon=0.49, skew=0.45, lacunarity=lacunarity, 
                                  push_upstream=0.1, push_downstream=0.1,
                                  scale_factor_start=0.75, soften_start = 0.75, weight_t=0.0, 
                                  bias_value = 2, verbose=False, control_function = self.get_base_height,
@@ -139,7 +139,7 @@ class landscape_gen():
         # del coarse_x, coarse_y
         # gc.collect()
         if mountainsca > 0:
-            mountains = self.get_mountain_heights(fine_x, fine_y, secondary,**kwargs)*mountainsca
+            mountains = self.get_mountain_heights(fine_x, fine_y, secondary,**kwargs)*10*mountainsca/(self.lin_sca**0.75)
             # del fine_x, fine_y
             # gc.collect()
             layered = self.layerise(x,y,base+mountains)
@@ -148,13 +148,14 @@ class landscape_gen():
             layered = self.layerise(x,y,base)
         if riversca > 0:
             freq = self.river_density/self.lin_sca
-            rivers_full = self.get_rivers(fine_x*rivernoise+x*(1-rivernoise),fine_y*rivernoise+y*(1-rivernoise),weight = np.clip(np.abs(layered*0.5), 0, 1), ** kwargs)*freq
+            lacunarity = 1.618
+            rivers_full = self.get_rivers(coarse_x*rivernoise+x*(1-rivernoise),coarse_y*rivernoise+y*(1-rivernoise),weight = np.clip(np.abs(layered*0.5), 0, 1), lacunarity=lacunarity, ** kwargs)*freq
             river_z = blend_distance_layers(rivers_full, intensity = np.clip(np.abs(layered*0.5), 0, 1), 
-                                            lacunarity=1.414, bias_value=0.005,base_frequency=2)*riversca/self.river_density
+                                            lacunarity=lacunarity, bias_value=0.01,base_frequency=3*np.sqrt(freq))*riversca*self.river_density/100
             river_map = 1 - blend_distance_layers(rivers_full, intensity = np.clip(np.abs(layered*0.5), 0, 1), 
-                                            lacunarity=1.414, bias_value=0.0,base_frequency=2)
+                                            lacunarity=lacunarity, bias_value=0.0,base_frequency=3*np.sqrt(freq))
         else:
             rivers_full = np.zeros((x.shape[0], x.shape[1], 1))
             river_z = np.zeros_like(base)
             river_map = np.zeros_like(base)
-        return (base, mountains , layered+river_z, river_map, rivers_full)
+        return (base, mountains , river_z+layered, layered, river_map)

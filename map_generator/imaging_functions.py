@@ -80,7 +80,7 @@ def normalize(Z, name = None): # normalizes Z to [0,1] and converts to uint16
     minimum_val = np.min(Z)
     maximum_val = np.max(Z)
     Z = Z + -1 * np.min(Z)
-    Z = 65535*Z /np.max(Z) - 0
+    Z = 65535*Z /np.max(Z)
     Z = Z.astype(np.uint16)
 
     from map_generator.backend_switch import gpu_enabled

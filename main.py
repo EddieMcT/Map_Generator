@@ -12,7 +12,7 @@ if not os.path.exists("world_parameters.txt"):
     # my_landscape.heights = np.asarray([-1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 0.910, 0.3669, -0.2849, 0.1799, -0.0072])
     # my_landscape.slopes_x = np.asarray([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,-0.04786425, -0.60944186, 0.00379029, 0.05412867, -0.14882481])
     # my_landscape.slopes_y = np.asarray([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,-0.28876273, -0.15828599, -0.14998169, -0.04830083, -0.04525484])
-    my_landscape.river_density = 15
+    my_landscape.river_density = 10
     mountainsca = 0.2 #Height of mountains in km
     riversca = 500 #Height of rivers in m
 else:
@@ -65,7 +65,7 @@ else: # Load (arbitrarily shaped) sampling coordinates
 print(f"{(1000*(max_pos-min_pos)/res):.2f} meters per pixel at zoom {zoom}") # print the scale of the generated map in meters per pixel to the nearest 2 decimal places
 import time
 start_time = time.time()
-base, mountains, Z, _, _ = my_landscape.get_height(X,Y, offs = 1.0, fine_offs =1.0, mountainsca = mountainsca, riversca=riversca)#, octaves=2,neg_octaves=0, fade=0.5,voron=True,ndims=1)
+base, mountains, Z, _, _ = my_landscape.get_height(X,Y, offs = 1.0, fine_offs =1.0, mountainsca = mountainsca, riversca=riversca,  rivernoise=0.1)#, octaves=2,neg_octaves=0, fade=0.5,voron=True,ndims=1)
 print(f"Time taken to generate the map: {time.time() - start_time:.2f} seconds")
 
 # save world parameters to regenerate the same world later
