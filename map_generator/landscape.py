@@ -37,8 +37,8 @@ class landscape_gen():
             slopes_r.append(random.random()**2) # Bias towards lower slopes
             slopes_theta.append(random.random()*2*np.pi)
         self.centroids = np.asarray(self.centroids)
-        self.slopes_x = np.asarray(np.multiply(np.cos(slopes_theta), slopes_r))
-        self.slopes_y = np.asarray(np.multiply(np.sin(slopes_theta), slopes_r))
+        self.slopes_x = np.multiply(np.cos(np.asarray(slopes_theta)), np.asarray(slopes_r))
+        self.slopes_y = np.multiply(np.sin(np.asarray(slopes_theta)), np.asarray(slopes_r))
         self.river_density = 20
 
     def compute_offsets(self, x, y,offs = 1, fine_offs =1, **kwargs): #consider using a different function for fine_offset

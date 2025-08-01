@@ -83,8 +83,13 @@ def normalize(Z, name = None): # normalizes Z to [0,1] and converts to uint16
     Z = 65535*Z /np.max(Z) - 0
     Z = Z.astype(np.uint16)
 
-    plt.imshow(Z*0.5 + 0.5)
-    plt.show()
+    from map_generator.backend_switch import gpu_enabled
+    if gpu_enabled:
+        import numpy as np_backup
+        Z = np_backup.asarray(Z.get())
+    else:
+        plt.imshow(Z*0.5 + 0.5)
+        plt.show()
     if name is not None:
         cv2.imwrite(f"{name}_max_{maximum_val}_min_{minimum_val}.png", Z)
     return Z
