@@ -63,8 +63,10 @@ else: # Load (arbitrarily shaped) sampling coordinates
     X = coords['x'].values
     Y = coords['y'].values
 print(f"{(1000*(max_pos-min_pos)/res):.2f} meters per pixel at zoom {zoom}") # print the scale of the generated map in meters per pixel to the nearest 2 decimal places
+import time
+start_time = time.time()
 base, mountains, Z, _, _ = my_landscape.get_height(X,Y, offs = 1.0, fine_offs =1.0, mountainsca = mountainsca, riversca=riversca)#, octaves=2,neg_octaves=0, fade=0.5,voron=True,ndims=1)
-
+print(f"Time taken to generate the map: {time.time() - start_time:.2f} seconds")
 
 # save world parameters to regenerate the same world later
 if not os.path.exists("world_parameters.txt"):

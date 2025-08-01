@@ -65,7 +65,7 @@ class landscape_gen():
                                  scale = freq, blend_scale = 1,return_full=True,
                                  include_secondary=False, **kwargs)
         return(river_z)
-    def get_base_height(self, x,y, include_secondary=True,distance_cap = 20,slope_intensity=1, **kwargs):
+    def get_base_height(self, x,y, include_secondary=True,distance_cap = 10,slope_intensity=1, **kwargs):
         x = np.array(x)
         y = np.array(y)
         #noise_height = offset[2] #Necessary? May cause tiling depending on noise
@@ -102,8 +102,10 @@ class landscape_gen():
     
     def get_mountain_heights(self, x,y,weight, bias = -0.175, **kwargs):
         #output = 0.125*distances#tbd, importance of the boundary itself, to generally change elevation rather than just mountain creation
-        output = np.multiply(np.maximum(weight, 0.0) , my_perl.sample(x,y,voron=True,neg_octaves=3,octaves=2,ndims=1,fade=0.3)[:,:,0])
-        output = 0.05* output + bias
+        
+        neg_octave = int(np.log2(self.lin_sca)-4) # 3 works for 200km, each doubling above this doubles the range
+        output = np.multiply(np.maximum(weight, 0.0) , my_perl.sample(x,y,voron=True,neg_octaves=neg_octave,octaves=2,ndims=1,fade=0.3)[:,:,0])
+        output = 0.4* output*(0.5**neg_octave) + bias
         output =  np.maximum(output, 0)#Add mountain texture
         #base_height += np.multiply(2 ** (-1 * base_height**2), fine_offset)*0.125 #Add hills
         return (output)
