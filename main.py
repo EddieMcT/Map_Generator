@@ -41,6 +41,7 @@ if not os.path.exists("sampling_coordinates.csv"): # create sampling coordinates
         c_y = 0
         zoom = 1 # Relative zoom, 1 = whole world without boundaries
         res = 128 # resolution in each direction
+        tiling = 4 # Tiling factor for the map, 2 means 2 tiles total
     else:
         with open("imaging_parameters.txt", "r") as f:
             lines = f.readlines()
@@ -48,6 +49,7 @@ if not os.path.exists("sampling_coordinates.csv"): # create sampling coordinates
             c_y = float(lines[1].split(":")[1].strip())
             zoom = float(lines[2].split(":")[1].strip())
             res = int(lines[3].split(":")[1].strip())
+            tiling = int(lines[4].split(":")[1].strip()) if len(lines) > 4 else 4
 
     min_pos = landscape_sca//2 - landscape_sca//(2*zoom)
     max_pos = landscape_sca//2 + landscape_sca//(2*zoom)
@@ -65,7 +67,18 @@ else: # Load (arbitrarily shaped) sampling coordinates
 print(f"{(1000*(max_pos-min_pos)/res):.2f} meters per pixel at zoom {zoom}") # print the scale of the generated map in meters per pixel to the nearest 2 decimal places
 import time
 start_time = time.time()
-base, mountains, Z, _, _ = my_landscape.get_height(X,Y, offs = 1.0, fine_offs =1.0, mountainsca = mountainsca, riversca=riversca,  rivernoise=0.1)#, octaves=2,neg_octaves=0, fade=0.5,voron=True,ndims=1)
+if tiling > 1:
+    import tqdm
+    print(f"Tiling the map into {tiling} parts for memory management")
+    X = np.array_split(X, tiling)
+    Y = np.array_split(Y, tiling)
+    Z = [np.zeros_like(X[i]) for i in range(tiling)]
+    for i in tqdm.tqdm(range(tiling), desc="Generating map sections"):
+        base, mountains, Z_tile, _, _ = my_landscape.get_height(X[i],Y[i], offs = 1.0, fine_offs =1.0, mountainsca = mountainsca, riversca=riversca,  rivernoise=0.1)#, octaves=2,neg_octaves=0, fade=0.5,voron=True,ndims=1)
+        Z[i] = Z_tile
+    Z = np.concatenate(Z, axis=0)
+else:
+    base, mountains, Z, _, _ = my_landscape.get_height(X,Y, offs = 1.0, fine_offs =1.0, mountainsca = mountainsca, riversca=riversca,  rivernoise=1)#, octaves=2,neg_octaves=0, fade=0.5,voron=True,ndims=1)
 print(f"Time taken to generate the map: {time.time() - start_time:.2f} seconds")
 
 # save world parameters to regenerate the same world later
@@ -77,14 +90,15 @@ if not os.path.exists("world_parameters.txt"):
         f.write(f"Slopes X (km across world size): {my_landscape.slopes_x.tolist()}\n")
         f.write(f"Slopes Y (km across world size): {my_landscape.slopes_y.tolist()}\n")
         f.write(f"River density (major branching points per world size in Dendry noise): {my_landscape.river_density}\n")
-        f.write(f"Mountain heights (km) (redundant with Dendry): {mountainsca}\n")
-        f.write(f"Dendry height (m): {riversca}\n")
+        f.write(f"Mountain heights (0-1): {mountainsca}\n")
+        f.write(f"Dendry height (0-1000): {riversca}\n")
 if not os.path.exists("imaging_parameters.txt") and not os.path.exists("sampling_coordinates.csv"):
     with open("imaging_parameters.txt", "w") as f:
         f.write(f"Offset X: {c_x}\n")
         f.write(f"Offset Y: {c_y}\n")
         f.write(f"Zoom: {zoom}\n")
         f.write(f"Resolution: {res}\n")
+        f.write(f"Tiling (number of splits for memory management): {tiling}\n")
         
 print(np.min(Z))
 print(np.max(Z))

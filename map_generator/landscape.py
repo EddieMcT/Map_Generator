@@ -58,7 +58,7 @@ class landscape_gen():
         freq = self.river_density/self.lin_sca #Frequency of major rivers, 20 across the world (nb not necessarily 20 separate rivers, but 20 points at which they're defined)
         river_z = my_perl.dendry(x=x,y=y, intensity=weight, dendry_layers=5, upres=2, final_sample=10, 
                                  initial_method='b', upres_tier_max=0,
-                                 base_frequency=freq, epsilon=0.49, skew=0.45, lacunarity=lacunarity, 
+                                 base_frequency=freq, epsilon=0.45, skew=0.45, lacunarity=lacunarity, 
                                  push_upstream=0.1, push_downstream=0.1,
                                  scale_factor_start=0.75, soften_start = 0.75, weight_t=0.0, 
                                  bias_value = 2, verbose=False, control_function = self.get_base_height,
@@ -139,7 +139,7 @@ class landscape_gen():
         # del coarse_x, coarse_y
         # gc.collect()
         if mountainsca > 0:
-            mountains = self.get_mountain_heights(fine_x, fine_y, secondary,**kwargs)*10*mountainsca/(self.lin_sca**0.75)
+            mountains = self.get_mountain_heights(fine_x, fine_y, secondary,**kwargs)*200*mountainsca/(self.lin_sca)
             # del fine_x, fine_y
             # gc.collect()
             layered = self.layerise(x,y,base+mountains)
@@ -150,8 +150,8 @@ class landscape_gen():
             freq = self.river_density/self.lin_sca
             lacunarity = 1.618
             rivers_full = self.get_rivers(coarse_x*rivernoise+x*(1-rivernoise),coarse_y*rivernoise+y*(1-rivernoise),weight = np.clip(np.abs(layered*0.5), 0, 1), lacunarity=lacunarity, ** kwargs)*freq
-            river_z = blend_distance_layers(rivers_full, intensity = np.clip(np.abs(layered*0.5), 0, 1), 
-                                            lacunarity=lacunarity, bias_value=0.01,base_frequency=3*np.sqrt(freq))*riversca*self.river_density/100
+            river_z = blend_distance_layers(rivers_full, intensity = np.clip(layered*0.85, 0, 1), 
+                                            lacunarity=lacunarity, bias_value=0.0025,base_frequency=6*np.sqrt(freq))*freq*riversca
             river_map = 1 - blend_distance_layers(rivers_full, intensity = np.clip(np.abs(layered*0.5), 0, 1), 
                                             lacunarity=lacunarity, bias_value=0.0,base_frequency=3*np.sqrt(freq))
         else:
