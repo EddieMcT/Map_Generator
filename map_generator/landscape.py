@@ -88,7 +88,8 @@ class landscape_gen():
         
         distances = np.minimum(distances, self.lin_sca/distance_cap) * distance_cap/self.lin_sca #Cap the distance at 10%? of the world size, ranging from 0 to 1
         
-        distances = 1 - distances #Weightings of each plate, this is effectively a blurring as you move away and causes primary ridges
+        distances = np.clip(1 - distances,0,1) #Weightings of each plate, this is effectively a blurring as you move away and causes primary ridges
+        distances = 3*distances**2 - 2*distances**3 #smoothstep
         base_height += np.multiply(distances, np.asarray(self.heights)[np.newaxis, np.newaxis, :])
         base_height = 1*np.sum(base_height, axis = -1)
         if include_secondary:
@@ -142,10 +143,10 @@ class landscape_gen():
             mountains = self.get_mountain_heights(fine_x, fine_y, secondary,**kwargs)*200*mountainsca/(self.lin_sca)
             # del fine_x, fine_y
             # gc.collect()
-            layered = self.layerise(x,y,base+mountains)
+            layered = self.layerise(x,y,base+mountains, weight=0)
         else:
             mountains = np.zeros_like(x)
-            layered = self.layerise(x,y,base)
+            layered = self.layerise(x,y,base, weight=0)
         if riversca > 0:
             freq = self.river_density/self.lin_sca
             lacunarity = 1.618
