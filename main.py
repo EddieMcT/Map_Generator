@@ -1,20 +1,23 @@
+from pathlib import Path
+
 from map_generator import backend_switch as np
+from map_generator.globals import REPO_ROOT
 from map_generator.imaging_functions import normalize
-from map_generator.parameters import Parameters, load_parameters, save_parameters
+from map_generator.parameters import load_params, Params, create_landscape
 
 
-def run(parameters: Parameters, output_prefix: str) -> None:
-    landscape_sca = parameters.landscape_sca
-    my_landscape = parameters.my_landscape
-    mountainsca = parameters.mountainsca
-    riversca = parameters.riversca
-    X = parameters.X
-    Y = parameters.Y
-    zoom = parameters.zoom
-    res = parameters.res
-    tiling = parameters.tiling
-    min_pos = parameters.min_pos
-    max_pos = parameters.max_pos
+def run(params: Params) -> None:
+    root_params = params.root_params
+    my_landscape = create_landscape(root_params.world)
+    mountainsca = root_params.world.mountain_heights
+    riversca = root_params.world.river_scale
+    X = params.X
+    Y = params.Y
+    zoom = root_params.imaging.zoom
+    res = root_params.imaging.resolution
+    tiling = root_params.imaging.tiling
+    min_pos = root_params.min_pos()
+    max_pos = root_params.max_pos()
 
     print(f"{(1000 * (max_pos - min_pos) / res):.2f} meters per pixel at zoom {zoom}")
     import time
@@ -34,29 +37,16 @@ def run(parameters: Parameters, output_prefix: str) -> None:
     print(f"Time taken to generate the map: {time.time() - start_time:.2f} seconds")
     print(np.min(Z))
     print(np.max(Z))
-    Z = normalize(Z, output_prefix)
-
-
+    Z = normalize(Z, root_params.timestamped_output_folder)
 
 
 def main(
-        world_params_path: str = "world_parameters.txt",
-        imaging_params_path: str = "imaging_parameters.txt",
-        sampling_coords_path: str = "sampling_coordinates.csv",
-        output_prefix: str = "output",
+        input_folder: Path = REPO_ROOT / "params/default",
+        output_folder: Path = REPO_ROOT / "output",
 ):
-    parameters = load_parameters(
-        world_params_path=world_params_path,
-        imaging_params_path=imaging_params_path,
-        sampling_coords_path=sampling_coords_path,
-    )
-    run(parameters, output_prefix=output_prefix)
-    save_parameters(
-        parameters,
-        world_params_path=world_params_path,
-        imaging_params_path=imaging_params_path,
-        sampling_coords_path=sampling_coords_path,
-    )
+    params = load_params(input_folder=input_folder, output_folder=output_folder)
+    run(params)
+    params.root_params.save()
 
 
 if __name__ == "__main__":

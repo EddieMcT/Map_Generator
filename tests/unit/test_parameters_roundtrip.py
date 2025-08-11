@@ -1,86 +1,73 @@
-import ast
 from pathlib import Path
 import unittest
 import tempfile
 
-from map_generator.parameters import load_parameters, save_parameters
-
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-
-
-def _parse_file_values(path: Path):
-    """
-    Parse the right-hand side of each "key: value" line into Python types for
-    robust, formatting-agnostic comparisons.
-
-    Why this complexity:
-    - The repository’s parameter files are human-written and may vary in benign
-      formatting (e.g., 0.4 vs. 0.40, 300 vs. 300.0, spacing within lists).
-    - A strict string comparison would fail on these harmless differences.
-    - By parsing RHS values (numbers, lists), we compare the actual data rather
-      than its textual representation, keeping the test stable while still
-      detecting real semantic differences.
-
-    If parsing fails for any line, we fall back to comparing the original RHS
-    string, ensuring we don’t hide unexpected content changes.
-    """
-    parsed = []
-    lines = path.read_text(encoding="utf-8").splitlines()
-    for line in lines:
-        if line.strip() == "":
-            continue
-        key, rhs = line.split(':', 1)
-        rhs = rhs.strip()
-        # Try to parse RHS into Python types when possible
-        try:
-            val = ast.literal_eval(rhs)
-        except (ValueError, SyntaxError):
-            val = rhs
-        parsed.append((key.strip(), val))
-    return parsed
+from map_generator.globals import REPO_ROOT
+from map_generator.parameters import load_params, WorldParams, ImagingParams, to_yaml
 
 
-class TestParameters(unittest.TestCase):
+class TestRootParams(unittest.TestCase):
 
-    def test_round_trip_load_save_matches_originals(self):
-        orig_world = REPO_ROOT / 'world_parameters.txt'
-        orig_imaging = REPO_ROOT / 'imaging_parameters.txt'
-        orig_sampling = REPO_ROOT / 'sampling_coordinates.csv'
-        params = load_parameters(
-            world_params_path=str(orig_world),
-            imaging_params_path=str(orig_imaging),
-            sampling_coords_path=str(orig_sampling),
+    def test_round_trip_load_then_save_then_load(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            params = load_params(REPO_ROOT / "params/default", output_folder=tmpdir_path)
+            timestamped_folder = params.root_params.timestamped_output_folder
+
+            params.root_params.save()
+
+            tmp_world = timestamped_folder / "world_params.yaml"
+            self.assertTrue(tmp_world.exists(), "world_params.yaml was not written in temp folder")
+            tmp_imaging = timestamped_folder / "imaging_params.yaml"
+            self.assertTrue(tmp_imaging.exists(), "imaging_params.yaml was not written in temp folder")
+
+            params_reloaded = load_params(timestamped_folder, output_folder=tmpdir_path)
+
+            self.assertEqual(
+                params.root_params, params_reloaded.root_params,
+                "first load and reloaded root params differ"
+            )
+
+    def test_world_params_round_trip_save_then_load_yaml(self):
+        world = WorldParams(
+            world_size=10,
+            mountain_heights=0.3,
+            river_scale=100.0,
+            centroids=[[0.0, 1.0], [1.0, 0.0], [0.5, 0.5]],
+            heights_tectonic_plates=[-1.0, 0.35, 0.1],
+            slopes_x=[0.0, 0.12, -0.05],
+            slopes_y=[0.0, -0.2, 0.3],
+            river_density=7,
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
-            tmp_world = tmpdir_path / 'world_parameters.txt'
-            tmp_imaging = tmpdir_path / 'imaging_parameters.txt'
-            tmp_sampling = tmpdir_path / 'sampling_coordinates.csv'
+            yaml_path = tmpdir_path / 'world_params.yaml'
 
-            save_parameters(
-                params,
-                world_params_path=str(tmp_world),
-                imaging_params_path=str(tmp_imaging),
-                sampling_coords_path=str(tmp_sampling),
-            )
+            to_yaml(world, yaml_path)
+            world2 = WorldParams.from_yaml(yaml_path)
 
-            self.assertTrue(tmp_world.exists(), "world_parameters was not written in temp folder")
-            self.assertTrue(tmp_imaging.exists(), "imaging_parameters was not written in temp folder")
+            self.assertTrue(yaml_path.exists(), "YAML file was not written in temp folder")
+            self.assertEqual(world, world2, "Mismatch after YAML roundtrip")
 
-            orig_world_vals = _parse_file_values(orig_world)
-            tmp_world_vals = _parse_file_values(tmp_world)
-            self.assertEqual(
-                orig_world_vals, tmp_world_vals,
-                "world_parameters.txt values differ between original and round-trip saved file"
-            )
+    def test_imaging_params_round_trip_save_then_load_yaml(self):
+        imaging = ImagingParams(
+            offset_x=1.0,
+            offset_y=-2.0,
+            zoom=2.0,
+            resolution=16,
+            tiling=2,
+        )
 
-            orig_imaging_vals = _parse_file_values(orig_imaging)
-            tmp_imaging_vals = _parse_file_values(tmp_imaging)
-            self.assertEqual(
-                orig_imaging_vals, tmp_imaging_vals,
-                "imaging_parameters.txt values differ between original and round-trip saved file"
-            )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            yaml_path = tmpdir_path / 'imaging_params.yaml'
+
+            to_yaml(imaging, yaml_path)
+            imaging2 = ImagingParams.from_yaml(yaml_path)
+
+            self.assertTrue(yaml_path.exists(), "YAML file was not written in temp folder")
+            self.assertEqual(imaging, imaging2, "Mismatch after YAML roundtrip")
 
 
 if __name__ == '__main__':
