@@ -1,0 +1,21 @@
+name: landscape_test_4
+channels:
+  - conda-forge
+  - defaults
+  - https://repo.anaconda.com/pkgs/main
+  - https://repo.anaconda.com/pkgs/r
+  - https://repo.anaconda.com/pkgs/msys2
+dependencies:
+  - cupy
+  - cupy-core
+  - matplotlib
+  - matplotlib-base
+  - numpy
+  - numpy-base
+  - pandas
+  - pip
+  - python=3.13
+  - tqdm
+  - pip:
+      - opencv-python
+prefix: C:\GBW_MyPrograms\miniconda3\envs\landscape_test_4
