@@ -27,12 +27,12 @@ class TestLandscape(unittest.TestCase):
         def test_normalize(res = 128): #Included here as it is tied to the output of landscape_gen
             X, Y = np.meshgrid(np.linspace(0, 200, res), np.linspace(0, 200, res))
             base, mountain, Z, _, _ = self.landscape.get_height(X, Y)
-            Z = normalize(Z, "tests/current_test.png")
+            Z = normalize(Z, "tests/acceptance/current_test.png")
             self.assertIsInstance(Z, np.ndarray)
             self.assertIsNotNone(Z, "Z is None")
             self.assertEqual(Z.shape, (res, res), f"Z shape is not ({res}, {res})")
         
-        test_folder = "tests"
+        test_folder = "tests/acceptance"
         test_normalize(1024)
         current_test_path = os.path.join(test_folder,"current_test.png")
         golden_record_path = os.path.join(test_folder,"golden_record.png")

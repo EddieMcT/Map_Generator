@@ -1,5 +1,0 @@
-Offset X: -50
-Offset Y: -140
-Zoom: 3.5
-Resolution: 256
-Tiling (number of splits for memory management): 64

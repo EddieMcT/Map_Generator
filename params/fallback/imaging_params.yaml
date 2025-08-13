@@ -1,0 +1,5 @@
+offset_x: 0.0
+offset_y: 0.0
+zoom: 1.0
+resolution: 128
+tiling: 4  # number of splits for memory management

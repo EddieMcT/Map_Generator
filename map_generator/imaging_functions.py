@@ -1,3 +1,6 @@
+from pathlib import Path
+from typing import Optional
+
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
@@ -76,7 +79,7 @@ def show_map_3d(gen_obj,img_x,img_y,sca,centre_offset=[0,0],num_samples = 1,vect
             
     return (X, Y, Z)
 
-def normalize(Z, name = None): # normalizes Z to [0,1] and converts to uint16
+def normalize(Z, output_folder: Optional[Path] = None): # normalizes Z to [0,1] and converts to uint16
     minimum_val = np.min(Z)
     maximum_val = np.max(Z)
     Z = Z + -1 * np.min(Z)
@@ -90,9 +93,11 @@ def normalize(Z, name = None): # normalizes Z to [0,1] and converts to uint16
     else:
         plt.imshow(Z*0.5 + 0.5)
         plt.show()
-    if name is not None:
-        cv2.imwrite(f"{name}_max_{maximum_val}_min_{minimum_val}.png", Z)
+    if output_folder is not None:
+        output_folder.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(output_folder / f"max_{maximum_val}_min_{minimum_val}.png"), Z)
     return Z
+
 def check_layer(sample_slice, layer1=-1, layer2=-1):
     print(sample_slice.shape) 
     print(sample_slice.min(), sample_slice.max())
