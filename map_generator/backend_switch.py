@@ -3,7 +3,7 @@
 # not expected to work on windows systems, can be enabled for WSL systems but is untested
 
 gpu_enabled = False
-debug = False
+debug = True
 # detect if cuda is available
 try:
     import cupy

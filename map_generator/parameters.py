@@ -25,6 +25,9 @@ class WorldParams:
     def from_yaml(path: str | Path) -> "WorldParams":
         data = yaml.safe_load(Path(path).read_text(encoding='utf-8'))
         return WorldParams(**data)
+    @staticmethod
+    def from_dict(data: dict) -> "WorldParams":
+        return WorldParams(**data)
 
 
 @dataclass(frozen=True)
@@ -38,6 +41,9 @@ class ImagingParams:
     @staticmethod
     def from_yaml(path: str | Path) -> "ImagingParams":
         data = yaml.safe_load(Path(path).read_text(encoding='utf-8'))
+        return ImagingParams(**data)
+    @staticmethod
+    def from_dict(data: dict) -> "ImagingParams":
         return ImagingParams(**data)
 
 def to_yaml(obj: WorldParams | ImagingParams, path: str | Path) -> None:

@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
+import map_generator.backend_switch as np
 import cv2
 import matplotlib.pyplot as plt
 
@@ -79,7 +79,7 @@ def show_map_3d(gen_obj,img_x,img_y,sca,centre_offset=[0,0],num_samples = 1,vect
             
     return (X, Y, Z)
 
-def normalize(Z, output_folder: Optional[Path] = None): # normalizes Z to [0,1] and converts to uint16
+def normalize(Z, output_folder: Optional[Path | str] = None): # normalizes Z to [0,1] and converts to uint16
     minimum_val = np.min(Z)
     maximum_val = np.max(Z)
     Z = Z + -1 * np.min(Z)
@@ -89,11 +89,12 @@ def normalize(Z, output_folder: Optional[Path] = None): # normalizes Z to [0,1] 
     from map_generator.backend_switch import gpu_enabled
     if gpu_enabled:
         import numpy as np_backup
-        Z = np_backup.asarray(Z.get())
+        Z = np_backup.asarray(to_numpy(Z))  # Convert to numpy array if using GPU backend
     else:
         plt.imshow(Z*0.5 + 0.5)
         plt.show()
     if output_folder is not None:
+        output_folder = Path(output_folder)
         output_folder.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(output_folder / f"max_{maximum_val}_min_{minimum_val}.png"), Z)
     return Z
@@ -103,3 +104,15 @@ def check_layer(sample_slice, layer1=-1, layer2=-1):
     print(sample_slice.min(), sample_slice.max())
     ax = plt.imshow(sample_slice[...,layer1,layer2])
     plt.show()
+
+def to_numpy(arr):
+    return arr.get() if hasattr(arr, "get") else arr
+def flatten_negative(z: np.ndarray, threshold=0, weight=1.0) -> np.ndarray:
+    """Reduces the impact of negative values in the array.
+    At a weight of 1.0, all values below the threshold are set to 0."""
+    fraction_normal = 1-0.5*weight
+    fraction_absolute = 0.5*weight
+    z = z - threshold
+    z = fraction_normal*z+fraction_absolute*np.abs(z)
+    z = z + threshold
+    return z

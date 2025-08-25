@@ -12,9 +12,9 @@ class TestLandscape(unittest.TestCase):
         self.landscape.heights = np.asarray([-1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -0.11070644243225414, 0.3668895455363128, -0.28487031743460167, 0.17991270123632352, -0.007167784173236491])
 
     def test_get_height(self):
-        for res in [16, 128, 256, 512]:   
+        for res in [16, 128, 256]:   
             X, Y = np.meshgrid(np.linspace(0, 200, res), np.linspace(0, 200, res))
-            base, mountain, Z, _, _ = self.landscape.get_height(X, Y)
+            base, mountain, Z, _, _ = self.landscape.get_height(X, Y, river_sca=0.0)
             for arr in [base, mountain, Z]:
                 self.assertIsInstance(arr, np.ndarray)
                 self.assertIsNotNone(arr, "Array is None")

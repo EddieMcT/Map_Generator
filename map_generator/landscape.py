@@ -3,6 +3,7 @@ from map_generator.noise_functions import my_perl, blend_distance_layers
 import random
 import math
 import gc
+from map_generator.imaging_functions import flatten_negative
 
 
 class landscape_gen():
@@ -43,7 +44,7 @@ class landscape_gen():
 
     def compute_offsets(self, x, y,offs = 1, fine_offs =1, **kwargs): #consider using a different function for fine_offset
         
-        neg_octave = int(np.log2(self.lin_sca)-3) # 4 works for 200km, each doubling above this doubles the range
+        neg_octave = int(np.log2(self.lin_sca)-4) # 4 works for 200km, each doubling above this doubles the range
         offset = my_perl.sample(x,y,neg_octaves = neg_octave, octaves=-1,ndims=2)  ##REFERENCES NOISE, UPDATE AS NECESSARY. Current method with -4 gives range of +-20km (real world ~= 250), each neg_octave doubles this
         fine_offset = my_perl.sample(x,y,neg_octaves = 1, octaves = 4,ndims=3) #Use ndims=3 for hill noise?
         offset =  np.add(fine_offset[:,:,0:2],offset) * offs
@@ -65,7 +66,7 @@ class landscape_gen():
                                  scale = freq, blend_scale = 1,return_full=True,
                                  include_secondary=False, **kwargs)
         return(river_z)
-    def get_base_height(self, x,y, include_secondary=True,distance_cap = 10,slope_intensity=1, **kwargs):
+    def get_base_height(self, x,y, include_secondary=True,distance_cap = 8,slope_intensity=1, **kwargs):
         x = np.array(x)
         y = np.array(y)
         #noise_height = offset[2] #Necessary? May cause tiling depending on noise
@@ -85,7 +86,10 @@ class landscape_gen():
         plate_dist = np.sort(distances, axis = -1)[:,:,0]#Distance to closest plate
         
         distances = np.subtract(distances, plate_dist[:,:,np.newaxis]) #How much further a plate is than the closest plate
-        
+        if include_secondary: #Functionally use twice the distance for this
+            distances_2 = np.minimum(distances, 2*self.lin_sca/distance_cap) * 0.5*distance_cap/self.lin_sca
+            distances_2 = np.clip(1 - distances_2,0,1)
+            distances_2 = 3*distances_2**2 - 2*distances_2**3
         distances = np.minimum(distances, self.lin_sca/distance_cap) * distance_cap/self.lin_sca #Cap the distance at 10%? of the world size, ranging from 0 to 1
         
         distances = np.clip(1 - distances,0,1) #Weightings of each plate, this is effectively a blurring as you move away and causes primary ridges
@@ -95,7 +99,7 @@ class landscape_gen():
         if include_secondary:
             #return(base_height) This point gives a very old, eroded landscape, similar to canyons or the Blue Mountains
             #Secondary shape should result in a curve that dips negative, making negative plates cause a ridge on neighbours, mimicking subduction
-            distances = np.multiply(distances, np.cos(distances*2*math.pi)) #Current secondary curve method, can be replaced.
+            distances = np.multiply(distances_2, np.cos(distances_2*1.5*math.pi)) #Current secondary curve method, can be replaced.
             distances = 1*np.sum(np.multiply(distances, np.asarray(self.heights)[np.newaxis, np.newaxis, :]), axis = -1)
             return(base_height, distances)
         else:
@@ -104,7 +108,7 @@ class landscape_gen():
     def get_mountain_heights(self, x,y,weight, bias = -0.175, **kwargs):
         #output = 0.125*distances#tbd, importance of the boundary itself, to generally change elevation rather than just mountain creation
         
-        neg_octave = int(np.log2(self.lin_sca)-4) # 3 works for 200km, each doubling above this doubles the range
+        neg_octave = 3 # int(np.log2(self.lin_sca)-4) # 3 works for 200km, each doubling above this doubles the range
         output = np.multiply(np.maximum(weight, 0.0) , my_perl.sample(x,y,voron=True,neg_octaves=neg_octave,octaves=2,ndims=1,fade=0.3)[:,:,0])
         output = 0.4* output*(0.5**neg_octave) + bias
         output =  np.maximum(output, 0)#Add mountain texture
@@ -140,23 +144,27 @@ class landscape_gen():
         # del coarse_x, coarse_y
         # gc.collect()
         if mountainsca > 0:
-            mountains = self.get_mountain_heights(fine_x, fine_y, secondary,**kwargs)*200*mountainsca/(self.lin_sca)
+            mountains = self.get_mountain_heights(fine_x, fine_y, np.clip(base*0.5-0.25, 0,1),**kwargs)*200*mountainsca/(self.lin_sca)
             # del fine_x, fine_y
             # gc.collect()
-            layered = self.layerise(x,y,base+mountains, weight=0)
+            # layered = self.layerise(x,y,base+mountains, weight=0)
         else:
             mountains = np.zeros_like(x)
-            layered = self.layerise(x,y,base, weight=0)
+            # layered = self.layerise(x,y,base, weight=0)
         if riversca > 0:
             freq = self.river_density/self.lin_sca
             lacunarity = 1.618
-            rivers_full = self.get_rivers(coarse_x*rivernoise+x*(1-rivernoise),coarse_y*rivernoise+y*(1-rivernoise),weight = np.clip(np.abs(layered*0.5), 0, 1), lacunarity=lacunarity, ** kwargs)*freq
-            river_z = blend_distance_layers(rivers_full, intensity = np.clip(layered*0.85, 0, 1), 
-                                            lacunarity=lacunarity, bias_value=0.0025,base_frequency=6*np.sqrt(freq))*freq*riversca
-            river_map = 1 - blend_distance_layers(rivers_full, intensity = np.clip(np.abs(layered*0.5), 0, 1), 
-                                            lacunarity=lacunarity, bias_value=0.0,base_frequency=3*np.sqrt(freq))
+            rivers_full = self.get_rivers(coarse_x*rivernoise+x*(1-rivernoise),coarse_y*rivernoise+y*(1-rivernoise),weight = np.clip((base+secondary+mountains)*0.85, 0, 1), lacunarity=lacunarity, ** kwargs)*freq*0.1
+            river_z = blend_distance_layers(rivers_full, intensity = np.clip((base+secondary)*0.85, 0, 1), 
+                                            lacunarity=lacunarity, bias_value=0.0025,base_frequency=6*np.sqrt(freq))*freq*riversca*2
+            river_z = np.power(river_z, 0.5)
+            # river_map = 1 - blend_distance_layers(rivers_full, intensity = np.clip(np.abs(layered*0.5), 0, 1), 
+            #                                 lacunarity=lacunarity, bias_value=0.0,base_frequency=3*np.sqrt(freq))
         else:
             rivers_full = np.zeros((x.shape[0], x.shape[1], 1))
             river_z = np.zeros_like(base)
             river_map = np.zeros_like(base)
-        return (base, mountains , river_z+layered, layered, river_map)
+        
+        base_0 = flatten_negative(base, threshold=0.0, weight=0.9)
+        river_0 = np.multiply(river_z, base_0)
+        return (base, mountains , base_0+river_0+mountains+secondary*0.4, river_z, secondary)
