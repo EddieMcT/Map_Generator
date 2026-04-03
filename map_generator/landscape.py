@@ -94,7 +94,8 @@ class landscape_gen():
         
         distances = np.clip(1 - distances,0,1) #Weightings of each plate, this is effectively a blurring as you move away and causes primary ridges
         distances = 3*distances**2 - 2*distances**3 #smoothstep
-        base_height += np.multiply(distances, np.asarray(self.heights)[np.newaxis, np.newaxis, :])
+        base_height += np.asarray(self.heights)[np.newaxis, np.newaxis, :]
+        base_height += np.multiply(distances, base_height) # multiplying in a separate step so that the slope contribution is also scaled
         base_height = 1*np.sum(base_height, axis = -1)
         if include_secondary:
             #return(base_height) This point gives a very old, eroded landscape, similar to canyons or the Blue Mountains
