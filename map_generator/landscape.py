@@ -67,25 +67,41 @@ class landscape_gen():
                                  include_secondary=False, **kwargs)
         return(river_z)
     def get_base_height(self, x,y, include_secondary=True,distance_cap = 8,slope_intensity=1, **kwargs):
+        ### Updated for higher dimensional inputs
+        # tested with 2 and 4D inputs, theoretically should handle any ndims, but best to test broadcasting first for new applications
+        # currently contains many assert statements to check this, but these can likely be removed
         x = np.array(x)
         y = np.array(y)
+        input_ndims = x.ndim
+        assert y.ndim == input_ndims, "X and Y must have the same number of dimensions"
+        input_shape = x.shape
+        assert y.shape == input_shape, "X and Y must have the same shape"
+        n_plates = len(self.centroids)
+        shape_with_plates = input_shape + (n_plates,)
         #noise_height = offset[2] #Necessary? May cause tiling depending on noise
-        diff_x = np.subtract(x[:, :, np.newaxis], self.centroids[:, 0]) #Distance from each point to each plate
-        diff_y = np.subtract(y[:, :, np.newaxis], self.centroids[:, 1]) #Distance from each point to each plate
+        diff_x = np.subtract(x[..., np.newaxis], self.centroids[:, 0]) #Distance from each point to each plate
+        diff_y = np.subtract(y[..., np.newaxis], self.centroids[:, 1]) #Distance from each point to each plate
+        
+        
         # calculate slope height contribution based on this linear distance
-        base_height = np.multiply(diff_x, self.slopes_x[np.newaxis, np.newaxis, :]) 
-        base_height += np.multiply(diff_y, self.slopes_y[np.newaxis, np.newaxis, :])
-        base_height *= slope_intensity/self.lin_sca #Scale the slope height contribution such that it would vary by a total of slope_intensity across the world
+        base_height = np.multiply(diff_x, self.slopes_x[np.newaxis, ...])  
+        # hardcoding of all additional dimensions is seemingly not possible while maintaining flexibility without for loop or braching eg if statements
+        # instead one new axis is added to enforce broadcasting
+        base_height += np.multiply(diff_y, self.slopes_y[np.newaxis, ...])
 
+        base_height *= slope_intensity/self.lin_sca #Scale the slope height contribution such that it would vary by a total of slope_intensity across the world
         diff_x = np.power(diff_x, 2) #Square the distance to each plate
         diff_y = np.power(diff_y, 2) #Square the distance to each plate
 
         distances = np.sqrt(np.add(diff_x, diff_y)) #Calculate the distance to each plate
 
         #plate_num = np.argmin(distances, axis = -1)
-        plate_dist = np.sort(distances, axis = -1)[:,:,0]#Distance to closest plate
+        # #Distance to closest plate
+        plate_dist = np.min(distances, axis = -1) # shape agnostic version
+        # assert plate_dist.shape == input_shape, "Plate distance shape does not match input shape"
         
-        distances = np.subtract(distances, plate_dist[:,:,np.newaxis]) #How much further a plate is than the closest plate
+        distances = np.subtract(distances, plate_dist[...,np.newaxis]) #How much further a plate is than the closest plate
+        assert distances.shape == shape_with_plates, "Distances shape does not match expected shape with plates"
         if include_secondary: #Functionally use twice the distance for this
             distances_2 = np.minimum(distances, 2*self.lin_sca/distance_cap) * 0.5*distance_cap/self.lin_sca
             distances_2 = np.clip(1 - distances_2,0,1)
@@ -94,14 +110,15 @@ class landscape_gen():
         
         distances = np.clip(1 - distances,0,1) #Weightings of each plate, this is effectively a blurring as you move away and causes primary ridges
         distances = 3*distances**2 - 2*distances**3 #smoothstep
-        base_height += np.asarray(self.heights)[np.newaxis, np.newaxis, :]
+        assert distances.shape == shape_with_plates, "Distances shape does not match expected shape with plates after processing"
+        base_height += np.asarray(self.heights)[np.newaxis, :]
         base_height += np.multiply(distances, base_height) # multiplying in a separate step so that the slope contribution is also scaled
-        base_height = 1*np.sum(base_height, axis = -1)
+        base_height = np.sum(base_height, axis = -1)
+        # This point in the process gives a very old, eroded landscape, similar to canyons or the Blue Mountains
         if include_secondary:
-            #return(base_height) This point gives a very old, eroded landscape, similar to canyons or the Blue Mountains
             #Secondary shape should result in a curve that dips negative, making negative plates cause a ridge on neighbours, mimicking subduction
             distances = np.multiply(distances_2, np.cos(distances_2*1.5*math.pi)) #Current secondary curve method, can be replaced.
-            distances = 1*np.sum(np.multiply(distances, np.asarray(self.heights)[np.newaxis, np.newaxis, :]), axis = -1)
+            distances = np.sum(np.multiply(distances, np.asarray(self.heights)[np.newaxis, :]), axis = -1)
             return(base_height, distances)
         else:
             return base_height

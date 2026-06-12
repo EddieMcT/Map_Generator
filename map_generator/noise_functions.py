@@ -714,15 +714,16 @@ class smoothnoise_generator():
         if verbose:
             print("Tree shape:", tree_x.shape, tree_y.shape)
         # find values of initial points according to the control function
-        c = np.zeros_like(tree_x)
-        for i in range(base_grid_size): 
-                if verbose:
-                    print(f"i: {i}")
-                for j in range(base_grid_size):
-                    if control_function is None:
-                        c[:,:,i,j] = 1.75*tree_x[:,:,i,j] + 0.15*tree_y[:,:,i,j] + self.sample(tree_x[:,:,i,j], tree_y[:,:,i,j], ndims=1)[:,:,0] 
-                    else:
-                        c[:,:,i,j] = control_function(tree_x[:,:,i,j], tree_y[:,:,i,j], **kwargs)
+        if control_function is None:
+            c = np.zeros_like(tree_x)
+            for i in range(base_grid_size): 
+                    if verbose:
+                        print(f"i: {i}")
+                    for j in range(base_grid_size):
+                        if control_function is None:
+                            c[:,:,i,j] = 1.75*tree_x[:,:,i,j] + 0.15*tree_y[:,:,i,j] + self.sample(tree_x[:,:,i,j], tree_y[:,:,i,j], ndims=1)[:,:,0] 
+        else:
+            c = control_function(tree_x, tree_y, **kwargs)
         chosen_idx_x, chosen_idx_y = check_inner_grid(c) # shape = rx, ry, 5,5, indices from 0 to 6 for tree_x and tree_y
         # Select points for first tier of splines
         # P0
