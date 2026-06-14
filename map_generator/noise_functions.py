@@ -1,7 +1,10 @@
+from pathlib import Path
 import map_generator.backend_switch as np
 import math
 # from scipy.interpolate import CubicSpline
 import gc
+
+from map_generator.globals import REPO_ROOT
 
 # =========================
 # Helper functions (to move to another file?)
@@ -113,8 +116,14 @@ def check_inner_grid(c = None):
 
     # Find the c values of neighbours for each point being calculated
     # shape=(X,Y,n_points-2, n_points-2, 3,3)
-    neighbour_c = np.lib.stride_tricks.sliding_window_view(c, (3, 3), axis=(-2, -1))
-
+    # originally created using a sliding window, but changing to indexing/stacking to allow for more robust ducktyping options
+    # neighbour_c = np.lib.stride_tricks.sliding_window_view(c, (3, 3), axis=(-2, -1))
+    neighbour_c = np.stack([
+        np.stack([
+            c[:,:, i:c.shape[-2]-(2-i), j:c.shape[-1]-(2-j)] 
+            for i in range(3)
+        ], axis=-1) for j in range(3)
+    ], axis=-1)
 
     # Take the index of the lowest neighbour in the n_points-2 by n_points-2 grid
     neighbour_x = np.argmin(neighbour_c, axis=-1) 
@@ -481,9 +490,13 @@ def blend_distance_layers(dists_full, intensity, lacunarity=1.414, bias_value=0.
     return sum_of_modes
 class smoothnoise_generator(): 
     
-    def __init__(self,x=128,y=128,max_oct=32, random_seed=1):
-        np.random.seed(random_seed)
-        self.pattern_ref = np.random.rand(x,y,3)*2 -1 #array of random values between -1 and 1
+    def __init__(self,x=128,y=128,max_oct=32, random_seed=1, precomputed_pattern = None):
+        if precomputed_pattern is not None:
+            # load in existing values as constants. Preferable for jit compilation eg jax
+            self.pattern_ref = precomputed_pattern
+        else:
+            np.random.seed(random_seed) #NB this will not work with Jax optimisation
+            self.pattern_ref = np.random.rand(x,y,3)*2 -1 #array of random values between -1 and 1
         self.cos_lut = [math.cos(2*i) for i in range(max_oct)] #used instead of calculating trig functions per pixel at runtime
         self.sin_lut = [math.sin(2*i) for i in range(max_oct)]
         #for i in range(max_oct): #so that negative values of i correspond to negative angles
@@ -941,8 +954,19 @@ class smoothnoise_generator():
         timings['interpolation'] = time.perf_counter() - start
         
         return s, timings
+precomputed_noise = None
+precomputed_noise_path = Path(REPO_ROOT) / "map_generator" / "resources" / "pattern_ref.npy"
+if precomputed_noise_path.exists():
+    # This is used to have static noise that is not precomputed each time, as this is essentially a constant in practice, and loading it as such is better for jit compilation
+    # the noise file used here is generated with the following code (the same as the backup generator):
+    # numpy.random.seed(1)
+    # pattern_ref = numpy.random.rand(256,256,3) * 2 - 1
+    precomputed_noise = np.load(precomputed_noise_path)
+    # for other noise, or larger noise if tiling issues emerge, then this can be recreated with different settings or resolution
+    # optionally this could all be changed for a procedural method of pseudorandom calculations, but this will need to be highly performant
 
-my_perl = smoothnoise_generator(256,256)
+
+my_perl = smoothnoise_generator(256,256, precomputed_pattern=precomputed_noise)
 
 def julia(x,y,c = 1j, n = 5,cap = 2):
     z = x + y*1j

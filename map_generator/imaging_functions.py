@@ -95,7 +95,8 @@ def normalize(Z, output_folder: Optional[Path | str] = None): # normalizes Z to 
         plt.show()
     if output_folder is not None:
         output_folder = Path(output_folder)
-        output_folder.mkdir(parents=True, exist_ok=True)
+        if not output_folder.exists():
+            output_folder.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(output_folder / f"max_{maximum_val}_min_{minimum_val}.png"), Z)
     return Z
 

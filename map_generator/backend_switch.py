@@ -31,17 +31,35 @@ except:
     if debug:
         print("cupy import failed. Disabling GPU acceleration.")
     gpu_enabled = False
+jax_available = False
+# try:
+#     import jax
+#     jax_available = True
+# except:
+#     if debug:
+#         print("jax import failed. JAX will not be available.")
+#     jax_available = False
 
-if gpu_enabled:
+if False and jax_available: # disabling for testing
+    if debug:
+        print("Using jax for graph based acceleration.")
+    from jax.numpy import newaxis, array_split, asarray, min, power, max, ndarray, add, multiply, sin, linspace, floor, concatenate, arange, zeros_like, zeros, cos, clip, sum, argmin, minimum, sqrt, maximum, broadcast_to, pi
+    from jax.numpy import subtract, ones_like, meshgrid, log2, array, abs, arctan2, where, square, uint16, divide, sort, absolute, linalg, ogrid, take_along_axis, indices, tile, isscalar, stack 
+    # from numpy import lib
+    from jax.numpy import load
+    from numpy import random
+
+elif gpu_enabled:
     # from cupy import *
     if debug:
         print("Using cupy for GPU acceleration.")
     from cupy import newaxis, array_split, asarray, min, power, max, ndarray, add, multiply, sin, linspace, floor, concatenate, arange, zeros_like, zeros, cos, clip, sum, argmin, minimum, sqrt, maximum, broadcast_to, random, pi
     from cupy import subtract, ones_like, meshgrid, log2, array, abs, arctan2, where, square, uint16, divide, sort, absolute, linalg, ogrid, lib, take_along_axis, indices, tile, isscalar, stack 
-    
+    from cupy import load
 else:
     # from numpy import *
     if debug:
         print("Using numpy for CPU processing.")
     from numpy import newaxis, array_split, asarray, min, power, max, ndarray, add, multiply, sin, linspace, floor, concatenate, arange, zeros_like, zeros, cos, clip, sum, argmin, minimum, sqrt, maximum, broadcast_to, random, pi 
     from numpy import subtract, ones_like, meshgrid, log2, array, abs, arctan2, where, square, uint16, divide, sort, absolute, linalg, ogrid, lib, take_along_axis, indices, tile, isscalar, stack 
+    from numpy import load

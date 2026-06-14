@@ -44,7 +44,8 @@ class landscape_gen():
 
     def compute_offsets(self, x, y,offs = 1, fine_offs =1, **kwargs): #consider using a different function for fine_offset
         
-        neg_octave = int(np.log2(self.lin_sca)-4) # 4 works for 200km, each doubling above this doubles the range
+        # neg_octave = int(np.log2(self.lin_sca)-4) # 4 works for 200km, each doubling above this doubles the range
+        neg_octave = np.log2(self.lin_sca).astype(int)-4
         offset = my_perl.sample(x,y,neg_octaves = neg_octave, octaves=-1,ndims=2)  ##REFERENCES NOISE, UPDATE AS NECESSARY. Current method with -4 gives range of +-20km (real world ~= 250), each neg_octave doubles this
         fine_offset = my_perl.sample(x,y,neg_octaves = 1, octaves = 4,ndims=3) #Use ndims=3 for hill noise?
         offset =  np.add(fine_offset[:,:,0:2],offset) * offs

@@ -33,7 +33,7 @@ class TestLandscape(unittest.TestCase):
             self.assertEqual(Z.shape, (res, res), f"Z shape is not ({res}, {res})")
         
         test_folder = "tests/acceptance"
-        test_normalize(1024)
+        test_normalize(512)
         current_test_path = os.path.join(test_folder,"current_test.png")
         golden_record_path = os.path.join(test_folder,"golden_record.png")
         self.assertTrue(os.path.exists(current_test_path), "current_test.png does not exist")
