@@ -86,8 +86,8 @@ def normalize(Z, output_folder: Optional[Path | str] = None): # normalizes Z to 
     Z = 65535*Z /np.max(Z)
     Z = Z.astype(np.uint16)
 
-    from map_generator.backend_switch import gpu_enabled
-    if gpu_enabled:
+    from map_generator.backend_switch import gpu_enabled, jax_available
+    if gpu_enabled or jax_available:
         import numpy as np_backup
         Z = np_backup.asarray(to_numpy(Z))  # Convert to numpy array if using GPU backend
     else:

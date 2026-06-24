@@ -504,16 +504,23 @@ class smoothnoise_generator():
         #    self.sin_lut.append(math.sin(2*(i-max_oct)))
             
     def pattern(self,x,y,ndims=3):
-        return(self.pattern_ref[x.astype(int)%self.pattern_ref.shape[0],y.astype(int)%self.pattern_ref.shape[1],0:ndims])
+        # return(self.pattern_ref[x.astype(int)%self.pattern_ref.shape[0],y.astype(int)%self.pattern_ref.shape[1],0:ndims])
         #Converts this version back to old method (pregen noise pattern) 
         
+        output_by_sin_fraction = np.sin(x)[..., np.newaxis] + np.cos(y[..., np.newaxis]*1.414 + np.arange(ndims))
+        output_by_sin_fraction = np.sin(output_by_sin_fraction* 1000) * 100
+        # take only fractional component:
+        output_by_sin_fraction = output_by_sin_fraction - np.floor(output_by_sin_fraction)
+        return(output_by_sin_fraction)
+
         #This is an attempt at procedural noise, but it produces too many artifacts to replace the pattern method
         primes = [4937,6053,5843,6701,6133,7919,7823,5281,5407,5443]
         output = np.zeros(ndims)
         for i in range(ndims):
             output[i] = 0.5 - ((x*(y+i+3)*7717 + y*(x+10*i)*7907*7717)%primes[i])/primes[i] #Pseudorandom output between -0.5 and 0.5
         return(output)
-    def find_grid(self, x, y, n=5, scale=1.0, epsilon=0.5, frequency = 1000, rotation = 0): # TODO REVIEW FOR EFFICIENCY, can we just floor x*freq directly?
+    def find_grid(self, x, y, n=5, scale=1.0, epsilon=0.5, frequency = 1000, rotation = 0, recenter=True): 
+        # TODO REVIEW FOR EFFICIENCY, can we just floor x*freq directly?
         # Generate a grid of jittered points around each input (x,y).
         # x and y are assumed to have shape (res, res).
         # Returns grid_centroids_x and grid_centroids_y with shape (res, res, n, n).
@@ -526,8 +533,8 @@ class smoothnoise_generator():
         # Expand x and y to shape (res, res, n, n) including added offsets of (n*n)
 
         offset_x, offset_y = np.meshgrid(offsets, offsets)
-        s = self.sin_lut[rotation]
-        c = self.cos_lut[rotation]
+        s = np.sin(rotation*2) # self.sin_lut[rotation] # 
+        c = np.cos(rotation*2) # self.cos_lut[rotation] # 
         qx = c * offset_x - s * offset_y #rotate offsets
         qy = s * offset_x + c * offset_y
         offset_x = qx
@@ -545,9 +552,15 @@ class smoothnoise_generator():
         qy = c * grid_centroids_y - s * grid_centroids_x
         grid_centroids_x = qx
         grid_centroids_y = qy
-        # Constant offset of 0.5 so that points are centred within their grid spaces, in a grid proportional to the frequency
-        grid_centroids_x = np.floor(grid_centroids_x)+0.5
-        grid_centroids_y = np.floor(grid_centroids_y)+0.5
+        if recenter:
+            # Constant offset of 0.5 so that points are centred within their grid spaces, in a grid proportional to the frequency
+            # TODO: check if this is necessary for dendry (not used in Voronoi)
+            grid_centroids_x = np.floor(grid_centroids_x)+0.5
+            grid_centroids_y = np.floor(grid_centroids_y)+0.5
+        else:
+            grid_centroids_x = np.floor(grid_centroids_x)
+            grid_centroids_y = np.floor(grid_centroids_y)
+
         qx = c * grid_centroids_x - s * grid_centroids_y # Forward rotation
         qy = s * grid_centroids_x + c * grid_centroids_y
         grid_centroids_x = qx
@@ -559,12 +572,13 @@ class smoothnoise_generator():
         #Frequency upsamples that so that nearby cells are less likely to have the same jitter
         
         jitter = self.pattern(grid_centroids_x*scale, grid_centroids_y*scale, ndims=2) 
+        # OPTIONAL: use jitter * abs(jitter) to weight towards lower values ie the middle of each cell. This is less uniform and unused edges may be visible, but it is less likely to hit edge cases when finding eg nearest neighbours
         grid_centroids_x = grid_centroids_x/frequency
         grid_centroids_y = grid_centroids_y/frequency
 
         # Rotate the jitter so that it is within the rotated grid squares
-        jitter_x = (c*jitter[:, :,:,:, 0] - s*jitter[:, :,:,:, 1])  * epsilon 
-        jitter_y = (s*jitter[:, :,:,:, 0] + c*jitter[:, :,:,:, 1]) * epsilon 
+        jitter_x = (c*jitter[..., 0] - s*jitter[..., 1])  * epsilon 
+        jitter_y = (s*jitter[..., 0] + c*jitter[..., 1]) * epsilon 
 
         # # Alternative: turn jitter into polar coordinates in radius epsilon to avoid hitting corners (UNTESTED)
         # jitter_x = np.sin(jitter_x) * epsilon
@@ -574,6 +588,7 @@ class smoothnoise_generator():
         grid_centroids_y = np.add(grid_centroids_y,jitter_y/frequency)
         
         return grid_centroids_x, grid_centroids_y
+
 
     def dendry_higher_tiers(self,x,y, dists_full, spline_start_x,spline_start_control_x,spline_end_control_x,spline_end_x, spline_start_y,spline_start_control_y,spline_end_control_y,spline_end_y,
                         base_frequency, epsilon=0.4,skew=0.5, lacunarity=1.414, push_upstream=0.1, push_downstream=0.2, scale_factor_start = 0.250,
@@ -831,21 +846,27 @@ class smoothnoise_generator():
         #c = c*(weights[1]*weights[2])
         #d = d*(weights[1]*weights[3])
         weight1 = x%1
-        weight1 = weight1[:,:,None]
+        # weight1 = weight1[:,:,None]
         weight1 = weight1 * weight1 * weight1 * (weight1 * (6 * weight1 - 15) + 10)
         weight0 = 1-weight1
         weight3 = y%1
-        weight3 = weight3[:,:,None]
+        # weight3 = weight3[:,:,None]
         weight3 = weight3 * weight3 * weight3 * (weight3 * (6 * weight3 - 15) + 10)
         weight2 = 1-weight3
-        a *= weight0
-        a *= weight2
-        b *= weight0
-        b *= weight3
-        c *= weight1
-        c *= weight2
-        d *= weight1
-        d *= weight3
+        
+        weight0 = np.asarray(weight0)
+        weight1 = np.asarray(weight1)
+        weight2 = np.asarray(weight2)
+        weight3 = np.asarray(weight3)
+
+        a *= weight0[..., np.newaxis]
+        a *= weight2[..., np.newaxis]
+        b *= weight0[..., np.newaxis]
+        b *= weight3[..., np.newaxis]
+        c *= weight1[..., np.newaxis]
+        c *= weight2[..., np.newaxis]
+        d *= weight1[..., np.newaxis]
+        d *= weight3[..., np.newaxis]
         a = np.add(a,b)
         c = np.add(c,d)
         
@@ -854,21 +875,37 @@ class smoothnoise_generator():
     
     
     def sample(self,x,y,octaves=1,neg_octaves=0, fade=0.5,voron=False,ndims=3, **kwargs) -> np.ndarray: 
-        output = np.zeros(ndims)
-        for i in range(neg_octaves*-1, octaves):
-            a = 2 ** i #Scale the starting positions by 2 for each octave
-            ax = x * a
-            ay = y * a
-            c = self.cos_lut[i] #faster than recalculating every time, but does give a different angle for negative i values
-            s = self.sin_lut[i]
-            qx = c * ax - s * ay
-            qy = s * ax + c * ay
-            if voron:
-                output = output+ self.voron(qx,qy)*fade**i
-            #TO DO: Add noise variant for Dendry, wherein nearest centroid is found
-            else:
-                output = output+ self.base_sample(qx,qy,ndims=ndims)*fade**i
-        return(output)
+        i_range = np.arange(neg_octaves*-1, octaves)
+        base_scale = 2.0 ** i_range[0] # scale for the first octave, to avoid integers to negative powers
+        i_range_from_0 = np.arange(len(i_range))
+        ax =  x[..., np.newaxis] * np.power(2, i_range_from_0) * base_scale # np.stack([x*base_scale*2**i for i in i_range_from_0], axis=-1) #
+        ay =  y[..., np.newaxis] * np.power(2, i_range_from_0) * base_scale # np.stack([y*base_scale*2**i for i in i_range_from_0], axis=-1) #
+        c = np.cos(2*i_range) # self.cos_lut[i]
+        s = np.sin(2*i_range) # self.sin_lut[i]
+        
+        qx =   np.subtract(ax*c, ay*s)
+        qy =   np.add(ax*s, ay*c)
+        if voron:
+            output = self.voron(qx,qy, randomness = 0.5)
+            # Previous version of this function returned identical values for each dimension, which resulted in the same shape for voron vs base_sample
+            # TODO: check if this is needed/assumed, as it is clearly redundant
+            # output = np.stack([output for _ in range(ndims)], axis=-1) 
+        else:
+            output = self.base_sample(qx,qy,ndims=ndims)
+            
+        weights = np.power(fade, i_range)
+        # for i in range(len(i_range)):
+        #     output[..., i, :] = output[..., i, :]# *weights[i]
+        if voron:
+            axis_of_iters = -2
+            output = np.stack([output[...,i]*weights[i] for i in range(len(i_range))], axis=-1)
+            output = np.stack([output for _ in range(ndims)], axis=-1) # duplicate the voron output across all dimensions, as it is a single value per pixel
+        else:
+            axis_of_iters = -2
+            output = np.stack([output[...,i, :]*weights[i] for i in range(len(i_range))], axis=-2)
+        # sample_stack = output.copy()
+        output = np.sum(output, axis=axis_of_iters)
+        return output # , weights, c, s, qx, qy, ax, ay, sample_stack
     
     def get_height(self,x,y,channel=-1, **kwargs):
         return(self.sample(x,y,**kwargs)[:,:,channel]) #Note that ndims >1 is irrelevant if channel is not a list/array, as only one channel will be selected
@@ -890,25 +927,25 @@ class smoothnoise_generator():
                 
                 sqdist = np.minimum(sqdist, centroid)#If this centroid is closer than previous, keep this distance (always a closest neighbour search, second closest neighbour not used here
         return(np.sqrt(sqdist)[:,:,None])
-    def voron(self,x,y,randomness = 0.5): # TODO check whether this can be changed to use find grid and/or check inner grid
-        # Create a voronoi (or Worley noise) pattern from the same starting pattern, returning distance to nearest centroid
+    def voron(self,x,y,randomness = 0.5): 
+
+        # new implementation using find_grid and check_inner_grid, intended to be dimensionality agnostic
         lox = np.floor(x)
         loy = np.floor(y)
-        frac = np.stack([x%1, y%1], axis = -1)
-        sqdist = np.zeros_like(x) + 1000
-        dist=  np.zeros_like(x) + 10#Instantiate distance as something (hopefully?) larger than all distances
-        for x_off in range(-1,3):
-            for y_off in range(-1,3):
-                #get the random offset of that location in the pattern. Pattern is -1 to 1, scale by 0.5 keeps points from overlapping
-                centroid = self.pattern(lox + x_off, loy + y_off,ndims = 2)
-                centroid += np.asarray([x_off, y_off])
-                centroid = np.subtract(frac, centroid)#calculate vector between this centroid and the sampled location
-                
-                centroid = np.square(centroid)
-                centroid = np.sum(centroid, axis = -1)
-                
-                sqdist = np.minimum(sqdist, centroid)#If this centroid is closer than previous, keep this distance (always a closest neighbour search, second closest neighbour not used here
-        return(np.sqrt(sqdist)[:,:,None])
+        # frac_x = x-lox
+        # frac_y = y-loy
+        grid_centroids_x, grid_centroids_y = self.find_grid(lox, loy, n=5, scale=1.0, epsilon=randomness*2, frequency = 1.0, rotation = 0, recenter=False)
+        # get the coordinates of the centroids of the grid squares around each point, with some randomness to avoid regularity. 
+        # These are in absolute coordinates, not relative to the input point
+    
+        grid_centroids_x = grid_centroids_x - x[..., np.newaxis, np.newaxis] # coordinates of centroids relative to the input point
+        grid_centroids_y = grid_centroids_y - y[..., np.newaxis, np.newaxis]
+        grid_centroids_x = np.power(grid_centroids_x, 2)
+        grid_centroids_y = np.power(grid_centroids_y, 2)
+        sqdist = np.add(grid_centroids_x, grid_centroids_y)
+        sqdist = np.min(sqdist, axis=-1)
+        sqdist = np.min(sqdist, axis=-1) # minimum distance to any centroid in the per-pixel grid
+        return np.sqrt(sqdist)# return the distance to the nearest centroid, as a simple voronoi function
     
     
     def profile_base_sample(self, x, y, ndims=3): #Not to be used in production code, only for profiling current version of base_sample

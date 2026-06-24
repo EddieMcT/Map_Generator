@@ -32,15 +32,15 @@ except:
         print("cupy import failed. Disabling GPU acceleration.")
     gpu_enabled = False
 jax_available = False
-# try:
-#     import jax
-#     jax_available = True
-# except:
-#     if debug:
-#         print("jax import failed. JAX will not be available.")
-#     jax_available = False
+try:
+    import jax
+    jax_available = False # True # Experimental feature, disabled for testing
+except:
+    if debug:
+        print("jax import failed. JAX will not be available.")
+    jax_available = False
 
-if False and jax_available: # disabling for testing
+if jax_available: # disabling for testing
     if debug:
         print("Using jax for graph based acceleration.")
     from jax.numpy import newaxis, array_split, asarray, min, power, max, ndarray, add, multiply, sin, linspace, floor, concatenate, arange, zeros_like, zeros, cos, clip, sum, argmin, minimum, sqrt, maximum, broadcast_to, pi

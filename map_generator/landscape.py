@@ -11,6 +11,7 @@ class landscape_gen():
         self.lat = lat 
         self.long = long 
         self.lin_sca = math.sqrt(lat*long)
+        self.noise_negative_octaves = np.log2(self.lin_sca).astype(int)-4 # 4 works for 200km, each doubling above this doubles the range
         self.mountains_done = False 
         self.rivers_done = False 
         self.centroids = []
@@ -42,11 +43,12 @@ class landscape_gen():
         self.slopes_y = np.multiply(np.sin(np.asarray(slopes_theta)), np.asarray(slopes_r))
         self.river_density = 20
 
-    def compute_offsets(self, x, y,offs = 1, fine_offs =1, **kwargs): #consider using a different function for fine_offset
+    def compute_offsets(self, x, y,offs = 1, fine_offs =1,neg_octave=4, **kwargs): #consider using a different function for fine_offset
         
         # neg_octave = int(np.log2(self.lin_sca)-4) # 4 works for 200km, each doubling above this doubles the range
-        neg_octave = np.log2(self.lin_sca).astype(int)-4
+        # neg_octave = self.noise_negative_octaves
         offset = my_perl.sample(x,y,neg_octaves = neg_octave, octaves=-1,ndims=2)  ##REFERENCES NOISE, UPDATE AS NECESSARY. Current method with -4 gives range of +-20km (real world ~= 250), each neg_octave doubles this
+        # print(offset.shape)
         fine_offset = my_perl.sample(x,y,neg_octaves = 1, octaves = 4,ndims=3) #Use ndims=3 for hill noise?
         offset =  np.add(fine_offset[:,:,0:2],offset) * offs
         fine_offset = np.add(fine_offset,my_perl.sample(x,y,neg_octaves = -4, octaves = 8,ndims=3)) * fine_offs
@@ -152,8 +154,9 @@ class landscape_gen():
         Z += weight*layer_output/freq
         return(Z)
 
-    def get_height(self, x,y,mountainsca = 1,riversca=500,rivernoise=0.2, **kwargs):
-        coarse_x, coarse_y, fine_x, fine_y = self.compute_offsets(x,y,**kwargs) 
+    def get_height(self, x,y,mountainsca = 1,riversca=500,rivernoise=0.2,neg_octave = 4, **kwargs):
+        # neg_octave = 4# int(np.log2(self.lin_sca)-4) # 4 works for 200km, each doubling above this doubles the range
+        coarse_x, coarse_y, fine_x, fine_y = self.compute_offsets(x,y,neg_octave = neg_octave, **kwargs) 
         #are fine_x and fine_y necessary for anything besides mountains?
         if mountainsca == 0 and riversca == 0:
             del fine_x, fine_y
